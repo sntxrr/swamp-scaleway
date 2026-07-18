@@ -45,8 +45,8 @@ follows smoke tests + the adversarial-review gate.
 | `@sntxrr/scaleway-vpc` | VPC & Private Networks | sync, create, delete, list, list-private-networks | ✅ built |
 | `@sntxrr/scaleway-rdb` | Managed Database (PG/MySQL) | sync, create, update, delete, list | ✅ built |
 | `@sntxrr/scaleway-dns` | Domains & DNS | sync, list-records, list-zones, set-records | ✅ built |
-| `@sntxrr/scaleway-load-balancer` | Load Balancer | sync, create, delete, list | 🚧 building |
-| `@sntxrr/scaleway-object-storage` | Object Storage (S3) | list-buckets, create-bucket, delete-bucket, sync, list-objects | 🚧 building |
+| `@sntxrr/scaleway-load-balancer` | Load Balancer | sync, create, delete, list, list-backends, list-frontends | ✅ built |
+| `@sntxrr/scaleway-object-storage` | Object Storage (S3, SigV4) | list-buckets, create-bucket, delete-bucket, sync, list-objects | ✅ built |
 
 See [PRD.md](./PRD.md) §6 for the full catalog across all three waves.
 
