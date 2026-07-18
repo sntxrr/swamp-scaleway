@@ -2,8 +2,9 @@
  * Scaleway Instance (compute) integration.
  *
  * Wraps the Scaleway Instance API (`/instance/v1`) so a swamp model represents a
- * single compute server, keyed by its server ID. Exposes `sync`, `start`,
- * `stop`, `reboot`, and a factory `list`. Authenticated with the `X-Auth-Token`
+ * single compute server, keyed by its server ID. Exposes `sync`, an `action`
+ * verb (poweron/poweroff/reboot/stop_in_place/terminate), and a factory `list`,
+ * plus a `valid-zone` pre-flight check. Authenticated with the `X-Auth-Token`
  * header (secret key wired from a vault).
  *
  * API reference: https://www.scaleway.com/en/developers/api/instance/
@@ -161,6 +162,19 @@ function toServerResource(
 const serversPath = (g: GlobalArgs): string =>
   `/instance/v1/zones/${g.zone}/servers`;
 
+/** The nine Scaleway availability zones (fr-par, nl-ams, pl-waw × 1..3). */
+const SCALEWAY_ZONES: readonly string[] = [
+  "fr-par-1",
+  "fr-par-2",
+  "fr-par-3",
+  "nl-ams-1",
+  "nl-ams-2",
+  "nl-ams-3",
+  "pl-waw-1",
+  "pl-waw-2",
+  "pl-waw-3",
+];
+
 // --- Model -----------------------------------------------------------------
 /** Scaleway Instance server model — one instance per server, keyed by serverId. */
 export const model = {
@@ -192,9 +206,13 @@ export const model = {
         );
         const handle = await context.writeResource(
           "server",
-          "latest",
+          g.serverId,
           toServerResource(res.server, g, new Date().toISOString()),
         );
+        logger.info("Synced Scaleway server {id} in {zone}", {
+          id: g.serverId,
+          zone: g.zone,
+        });
         return { dataHandles: [handle] };
       },
     },
@@ -217,16 +235,27 @@ export const model = {
           `${serversPath(g)}/${encodeURIComponent(g.serverId)}/action`,
           { action: args.action },
         );
-        const res = await scalewayFetch<{ server: Record<string, unknown> }>(
-          g,
-          "GET",
-          `${serversPath(g)}/${encodeURIComponent(g.serverId)}`,
-        );
+        const now = new Date().toISOString();
+        // `terminate` deletes the server: a follow-up GET would 404 (the
+        // resource is gone) and surface a false failure. Write a synthetic
+        // `terminating` snapshot instead. All other actions re-read state.
+        const server = args.action === "terminate"
+          ? { id: g.serverId, state: "terminating", zone: g.zone }
+          : (await scalewayFetch<{ server: Record<string, unknown> }>(
+            g,
+            "GET",
+            `${serversPath(g)}/${encodeURIComponent(g.serverId)}`,
+          )).server;
         const handle = await context.writeResource(
           "server",
-          "latest",
-          toServerResource(res.server, g, new Date().toISOString()),
+          g.serverId,
+          toServerResource(server, g, now),
         );
+        logger.info("Completed action {action} on server {id} in {zone}", {
+          action: args.action,
+          id: g.serverId,
+          zone: g.zone,
+        });
         return { dataHandles: [handle] };
       },
     },
@@ -262,6 +291,29 @@ export const model = {
       },
     },
   },
+  checks: {
+    "valid-zone": {
+      description:
+        "Ensure globalArgs.zone is one of the nine Scaleway availability zones.",
+      labels: ["policy"],
+      execute: (
+        context: { globalArgs: GlobalArgs },
+      ): { pass: boolean; errors?: string[] } => {
+        const zone = context.globalArgs.zone;
+        if (!SCALEWAY_ZONES.includes(zone)) {
+          return {
+            pass: false,
+            errors: [
+              `Zone "${zone}" is not a valid Scaleway zone. Allowed: ${
+                SCALEWAY_ZONES.join(", ")
+              }.`,
+            ],
+          };
+        }
+        return { pass: true };
+      },
+    },
+  },
 };
 
 /** Internal helpers exported only for unit testing. */
@@ -270,4 +322,5 @@ export const _internal = {
   scalewayListAll,
   toServerResource,
   serversPath,
+  SCALEWAY_ZONES,
 };

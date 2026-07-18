@@ -18,10 +18,14 @@ is never logged or stored in a snapshot.
 | Method          | What it does                                                                       |
 | --------------- | ---------------------------------------------------------------------------------- |
 | `list-buckets`  | Factory discovery — `GET /` → `ListAllMyBucketsResult`; snapshot every bucket        |
-| `create-bucket` | Create the managed bucket (`PUT /{bucket}`)                                          |
-| `delete-bucket` | Delete the managed bucket (`DELETE /{bucket}`; the bucket must be empty)             |
+| `create`        | Create the managed bucket (`PUT /{bucket}`); idempotent — a 409 (already yours) is success |
+| `delete`        | Delete the managed bucket (`DELETE /{bucket}`; the bucket must be empty); idempotent — a 404 (already gone) is success |
 | `sync`          | Confirm the managed bucket exists and record its region (`HEAD /{bucket}`)           |
 | `list-objects`  | Factory discovery — `GET /{bucket}?list-type=2` (ListObjectsV2), paginated via tokens |
+
+A labeled pre-flight check (`valid-region`, label `policy`) runs before the
+mutating `create`/`delete` methods and fails fast unless `region` is one of
+`fr-par`, `nl-ams`, or `pl-waw`.
 
 Object put/get/delete are **out of scope for v1** and are planned as a future
 addition.
@@ -46,11 +50,11 @@ swamp model create @sntxrr/scaleway-object-storage my-bucket \
 
 ```bash
 swamp model @sntxrr/scaleway-object-storage method run list-buckets my-bucket
-swamp model @sntxrr/scaleway-object-storage method run create-bucket my-bucket
+swamp model @sntxrr/scaleway-object-storage method run create my-bucket
 swamp model @sntxrr/scaleway-object-storage method run sync my-bucket
 swamp model @sntxrr/scaleway-object-storage method run list-objects my-bucket
 swamp model @sntxrr/scaleway-object-storage method run list-objects my-bucket --input prefix=logs/
-swamp model @sntxrr/scaleway-object-storage method run delete-bucket my-bucket
+swamp model @sntxrr/scaleway-object-storage method run delete my-bucket
 ```
 
 `list-buckets`, `sync`, and `list-objects` are read-only. `list-buckets` and

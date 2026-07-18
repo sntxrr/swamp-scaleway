@@ -5,9 +5,12 @@
  * zone/region segment in the path) so a swamp model represents a single managed
  * DNS zone, keyed by its domain name (`dnsZone`). Exposes `sync` /
  * `list-records` (snapshot every record in the zone), a factory `list-zones`
- * (snapshot every DNS zone in the project), and `set-records` (apply a batch of
+ * (snapshot every DNS zone in the project), and `update` (apply a batch of
  * add/set/delete/clear record changes via PATCH). Authenticated with the
  * `X-Auth-Token` header (secret key wired from a vault).
+ *
+ * A labeled pre-flight check (`zone-specified`) auto-runs before `update` (the
+ * mutating verb) to ensure the mutation targets a non-empty DNS zone.
  *
  * API reference: https://www.scaleway.com/en/developers/api/domains-and-dns/
  * @module
@@ -32,7 +35,7 @@ const GlobalArgsSchema = z.object({
 });
 type GlobalArgs = z.infer<typeof GlobalArgsSchema>;
 
-const SetRecordsArgsSchema = z.object({
+const UpdateArgsSchema = z.object({
   changes: z.array(z.record(z.string(), z.unknown())).describe(
     "Ordered list of record-change operations. Each entry holds exactly one of " +
       "`add` ({ records }), `set` ({ id_fields, records }), `delete` " +
@@ -269,6 +272,27 @@ export const model = {
       garbageCollection: 20,
     },
   },
+  checks: {
+    "zone-specified": {
+      description:
+        "A DNS mutation must target a zone: globalArgs.dnsZone must be set.",
+      labels: ["policy"],
+      execute: (
+        context: { globalArgs: GlobalArgs },
+      ): { pass: boolean; errors?: string[] } => {
+        const zone = context.globalArgs.dnsZone;
+        if (!zone || zone.trim() === "") {
+          return {
+            pass: false,
+            errors: [
+              "globalArgs.dnsZone is empty — a DNS mutation must target a zone.",
+            ],
+          };
+        }
+        return { pass: true };
+      },
+    },
+  },
   methods: {
     sync: {
       description:
@@ -299,6 +323,9 @@ export const model = {
         context: ExecuteContext,
       ): Promise<{ dataHandles: Array<{ name: string }> }> => {
         const { globalArgs: g, logger } = context;
+        logger.info("Discovering DNS zones in project {project}", {
+          project: g.projectId,
+        });
         const zones = await scalewayListAll<Record<string, unknown>>(
           g,
           `${zonesPath()}?project_id=${encodeURIComponent(g.projectId)}`,
@@ -322,12 +349,12 @@ export const model = {
         return { dataHandles: handles };
       },
     },
-    "set-records": {
+    update: {
       description:
         "Apply a batch of record changes (add/set/delete/clear) to the zone (PATCH).",
-      arguments: SetRecordsArgsSchema,
+      arguments: UpdateArgsSchema,
       execute: async (
-        args: z.infer<typeof SetRecordsArgsSchema>,
+        args: z.infer<typeof UpdateArgsSchema>,
         context: ExecuteContext,
       ): Promise<{ dataHandles: Array<{ name: string }> }> => {
         const { globalArgs: g, logger } = context;
@@ -357,6 +384,13 @@ export const model = {
             ),
           );
         }
+        logger.info(
+          "Applied record changes to {zone}; snapshotted {n} records",
+          {
+            zone: g.dnsZone,
+            n: handles.length,
+          },
+        );
         return { dataHandles: handles };
       },
     },

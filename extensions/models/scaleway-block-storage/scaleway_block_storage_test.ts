@@ -173,6 +173,72 @@ Deno.test("delete DELETEs the volume and records a deleting snapshot", async () 
     `/block/v1/zones/fr-par-1/volumes/${G.volumeId}`,
   );
   assertEquals(writes[0].data.status, "deleting");
+  // Snapshot is keyed by the real volume id, never the literal "latest".
+  assertEquals(writes[0].name, G.volumeId);
+});
+
+Deno.test("delete treats a 404 as success and writes an absent snapshot", async () => {
+  const { ctx, writes } = makeContext();
+  let calls = 0;
+  await withMockedFetch(
+    () => {
+      calls++;
+      return new Response(JSON.stringify({ message: "not found" }), {
+        status: 404,
+      });
+    },
+    () => model.methods.delete.execute({}, ctx),
+  );
+  // The 404 was swallowed (no retry, no throw) and a snapshot was written.
+  assertEquals(calls, 1);
+  assertEquals(writes.length, 1);
+  assertEquals(writes[0].name, G.volumeId);
+  assertEquals(writes[0].data.status, "absent");
+});
+
+Deno.test('sync writes the snapshot under the volume id, not "latest"', async () => {
+  const { ctx, writes } = makeContext();
+  await withMockedFetch(
+    () =>
+      new Response(
+        JSON.stringify({
+          id: G.volumeId,
+          status: "available",
+          zone: "fr-par-1",
+        }),
+        { status: 200 },
+      ),
+    () => model.methods.sync.execute({}, ctx),
+  );
+  assertEquals(writes[0].name, G.volumeId);
+});
+
+Deno.test('update writes the snapshot under the volume id, not "latest"', async () => {
+  const { ctx, writes } = makeContext();
+  await withMockedFetch(
+    () =>
+      new Response(
+        JSON.stringify({
+          id: G.volumeId,
+          name: "renamed",
+          status: "resizing",
+          zone: "fr-par-1",
+        }),
+        { status: 200 },
+      ),
+    () => model.methods.update.execute({ name: "renamed" }, ctx),
+  );
+  assertEquals(writes[0].name, G.volumeId);
+});
+
+Deno.test("valid-zone check passes for a real zone and fails for a bogus one", () => {
+  const pass = model.checks["valid-zone"].execute({ globalArgs: G as never });
+  assertEquals(pass.pass, true);
+  const fail = model.checks["valid-zone"].execute({
+    globalArgs: { ...G, zone: "us-east-1" } as never,
+  });
+  assertEquals(fail.pass, false);
+  assert(Array.isArray(fail.errors) && fail.errors.length > 0);
 });
 
 Deno.test("list aggregates pages until total_count is reached", async () => {

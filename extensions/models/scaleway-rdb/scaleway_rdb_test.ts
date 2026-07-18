@@ -70,7 +70,7 @@ Deno.test("sync GETs the instance and maps the resource with the auth header", a
           region: "fr-par",
           is_ha_cluster: false,
           volume: { type: "lssd", size: 5000000000 },
-          endpoints: [{ ip: "51.15.1.1", port: 5432 }],
+          endpoints: [{ ip: "203.0.113.10", port: 5432 }],
           created_at: "2026-07-17T00:00:00Z",
         }),
         { status: 200 },
@@ -86,11 +86,13 @@ Deno.test("sync GETs the instance and maps the resource with the auth header", a
     G.secretKey,
   );
   assertEquals(writes[0].spec, "instance");
+  // Snapshot is keyed under the real instance ID, never the literal "latest".
+  assertEquals(writes[0].name, G.instanceId);
   assertEquals(writes[0].data.status, "ready");
   assertEquals(writes[0].data.engine, "PostgreSQL-15");
   assertEquals(writes[0].data.nodeType, "DB-DEV-S");
   assertEquals(writes[0].data.volumeType, "lssd");
-  assertEquals(writes[0].data.endpointHost, "51.15.1.1");
+  assertEquals(writes[0].data.endpointHost, "203.0.113.10");
   assertEquals(writes[0].data.endpointPort, 5432);
 });
 
@@ -186,6 +188,7 @@ Deno.test("update PATCHes mutable fields and re-snapshots", async () => {
     () => model.methods.update.execute({ name: "renamed" }, ctx),
   );
   assertEquals(methods[0], "PATCH");
+  assertEquals(writes[0].name, G.instanceId);
   assertEquals(writes[0].data.name, "renamed");
 });
 
@@ -207,7 +210,22 @@ Deno.test("delete DELETEs the instance", async () => {
     () => model.methods.delete.execute({}, ctx),
   );
   assertEquals(methods[0], "DELETE");
+  assertEquals(writes[0].name, G.instanceId);
   assertEquals(writes[0].data.status, "deleting");
+});
+
+Deno.test("delete treats a 404 as success and writes an absent snapshot", async () => {
+  const { ctx, writes } = makeContext();
+  await withMockedFetch(
+    () =>
+      new Response(JSON.stringify({ message: "not found" }), { status: 404 }),
+    () => model.methods.delete.execute({}, ctx),
+  );
+  // A 404 (already gone) is not an error: exactly one absent snapshot is written.
+  assertEquals(writes.length, 1);
+  assertEquals(writes[0].name, G.instanceId);
+  assertEquals(writes[0].data.id, G.instanceId);
+  assertEquals(writes[0].data.status, "absent");
 });
 
 Deno.test("list aggregates pages until total_count is reached", async () => {
@@ -242,6 +260,17 @@ Deno.test("a non-2xx response throws and writes nothing", async () => {
   );
   assert(threw);
   assertEquals(writes.length, 0);
+});
+
+Deno.test("valid-region check passes for a supported region and fails otherwise", () => {
+  const check = model.checks["valid-region"];
+  assertEquals(check.execute({ globalArgs: G }).pass, true);
+  const bad = check.execute({
+    globalArgs: { ...G, region: "us-east-1" },
+  });
+  assertEquals(bad.pass, false);
+  assert(Array.isArray(bad.errors) && bad.errors.length > 0);
+  assertStringIncludes(bad.errors[0], "us-east-1");
 });
 
 Deno.test("instancesPath is regional", () => {

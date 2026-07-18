@@ -3,10 +3,10 @@
  *
  * Wraps the Scaleway Load Balancer API (`/lb/v1`, zoned) so a swamp model
  * represents a single Load Balancer, keyed by its LB ID. Exposes `sync` (GET
- * one LB), `create` (POST), `delete` (DELETE), a factory `list` over every LB
- * in the zone, and factory `list-backends` / `list-frontends` over one LB's
- * sub-resources. Authenticated with the `X-Auth-Token` header (secret key wired
- * from a vault).
+ * one LB), `create` (POST), `update` (PUT), `delete` (DELETE), a factory `list`
+ * over every LB in the zone, and factory `list-backends` / `list-frontends`
+ * over one LB's sub-resources. Authenticated with the `X-Auth-Token` header
+ * (secret key wired from a vault).
  *
  * The regional Load Balancer API is deprecated — this model uses the zoned API.
  *
@@ -51,12 +51,38 @@ const CreateArgsSchema = z.object({
   ),
 });
 
+/** Arguments for `update` (UpdateLb). */
+const UpdateArgsSchema = z.object({
+  name: z.string().optional().describe(
+    "New name for the Load Balancer.",
+  ),
+  description: z.string().optional().describe(
+    "New human-readable description of the Load Balancer.",
+  ),
+  tags: z.array(z.string()).optional().describe(
+    "Replacement list of tags to attach to the Load Balancer.",
+  ),
+});
+
 /** Arguments for `delete` (DeleteLb). */
 const DeleteArgsSchema = z.object({
   releaseIp: z.boolean().default(false).describe(
     "Whether to release the Load Balancer's flexible IP addresses on delete.",
   ),
 });
+
+/** The nine Scaleway availability zones (see zoned Load Balancer API). */
+const SCALEWAY_ZONES = [
+  "fr-par-1",
+  "fr-par-2",
+  "fr-par-3",
+  "nl-ams-1",
+  "nl-ams-2",
+  "nl-ams-3",
+  "pl-waw-1",
+  "pl-waw-2",
+  "pl-waw-3",
+] as const;
 
 const LoadBalancerSchema = z.object({
   id: z.string(),
@@ -287,9 +313,10 @@ export const model = {
         );
         const handle = await context.writeResource(
           "loadBalancer",
-          "latest",
+          g.lbId,
           toLoadBalancerResource(res, g, new Date().toISOString()),
         );
+        logger.info("Synced Scaleway Load Balancer {id}", { id: g.lbId });
         return { dataHandles: [handle] };
       },
     },
@@ -320,11 +347,41 @@ export const model = {
           lbsPath(g),
           body,
         );
+        const newId = (res.id as string) ?? g.lbId;
         const handle = await context.writeResource(
           "loadBalancer",
-          "latest",
+          newId,
           toLoadBalancerResource(res, g, new Date().toISOString()),
         );
+        logger.info("Created Scaleway Load Balancer {id}", { id: newId });
+        return { dataHandles: [handle] };
+      },
+    },
+    update: {
+      description: "Update the Load Balancer's mutable fields (UpdateLb).",
+      arguments: UpdateArgsSchema,
+      execute: async (
+        args: z.infer<typeof UpdateArgsSchema>,
+        context: ExecuteContext,
+      ): Promise<{ dataHandles: Array<{ name: string }> }> => {
+        const { globalArgs: g, logger } = context;
+        logger.info("Updating Scaleway Load Balancer {id}", { id: g.lbId });
+        const body: Record<string, unknown> = {};
+        if (args.name !== undefined) body.name = args.name;
+        if (args.description !== undefined) body.description = args.description;
+        if (args.tags !== undefined) body.tags = args.tags;
+        const res = await scalewayFetch<Record<string, unknown>>(
+          g,
+          "PUT",
+          `${lbsPath(g)}/${encodeURIComponent(g.lbId)}`,
+          body,
+        );
+        const handle = await context.writeResource(
+          "loadBalancer",
+          g.lbId,
+          toLoadBalancerResource(res, g, new Date().toISOString()),
+        );
+        logger.info("Updated Scaleway Load Balancer {id}", { id: g.lbId });
         return { dataHandles: [handle] };
       },
     },
@@ -337,22 +394,29 @@ export const model = {
       ): Promise<{ dataHandles: Array<{ name: string }> }> => {
         const { globalArgs: g, logger } = context;
         logger.info("Deleting Scaleway Load Balancer {id}", { id: g.lbId });
-        await scalewayFetch(
-          g,
-          "DELETE",
-          `${lbsPath(g)}/${
-            encodeURIComponent(g.lbId)
-          }?release_ip=${args.releaseIp}`,
-        );
+        try {
+          await scalewayFetch(
+            g,
+            "DELETE",
+            `${lbsPath(g)}/${
+              encodeURIComponent(g.lbId)
+            }?release_ip=${args.releaseIp}`,
+          );
+        } catch (e) {
+          // Idempotent delete: a 404 means the LB is already gone (CONVENTIONS
+          // §3.2). Any other error is fatal.
+          if ((e as { status?: number }).status !== 404) throw e;
+        }
         const handle = await context.writeResource(
           "loadBalancer",
-          "latest",
+          g.lbId,
           toLoadBalancerResource(
-            { id: g.lbId, status: "deleting" },
+            { id: g.lbId, status: "absent" },
             g,
             new Date().toISOString(),
           ),
         );
+        logger.info("Deleted Scaleway Load Balancer {id}", { id: g.lbId });
         return { dataHandles: [handle] };
       },
     },
@@ -449,6 +513,29 @@ export const model = {
           );
         }
         return { dataHandles: handles };
+      },
+    },
+  },
+  checks: {
+    "valid-zone": {
+      description:
+        "Ensure the configured zone is one of the nine Scaleway zones.",
+      labels: ["policy"],
+      execute: (
+        context: { globalArgs: GlobalArgs },
+      ): { pass: boolean; errors?: string[] } => {
+        const zone = context.globalArgs.zone;
+        if (!(SCALEWAY_ZONES as readonly string[]).includes(zone)) {
+          return {
+            pass: false,
+            errors: [
+              `Zone "${zone}" is not a valid Scaleway zone. Allowed: ${
+                SCALEWAY_ZONES.join(", ")
+              }.`,
+            ],
+          };
+        }
+        return { pass: true };
       },
     },
   },

@@ -85,7 +85,7 @@ Deno.test("sync GETs the VPC and maps the resource with the auth header", async 
     G.secretKey,
   );
   assertEquals(writes[0].spec, "vpc");
-  assertEquals(writes[0].name, "latest");
+  assertEquals(writes[0].name, G.vpcId);
   assertEquals(writes[0].data.name, "prod-vpc");
   assertEquals(writes[0].data.routingEnabled, true);
   assertEquals(writes[0].data.privateNetworkCount, 3);
@@ -129,7 +129,7 @@ Deno.test("create POSTs the body and snapshots the returned VPC", async () => {
   assertEquals(writes[0].data.name, "new-vpc");
 });
 
-Deno.test("delete DELETEs the VPC and writes nothing", async () => {
+Deno.test("delete DELETEs the VPC and writes an absent snapshot under vpcId", async () => {
   const { ctx, writes } = makeContext();
   let captured: { url: string; init: RequestInit } | null = null;
   const result = await withMockedFetch(
@@ -143,8 +143,113 @@ Deno.test("delete DELETEs the VPC and writes nothing", async () => {
   assertEquals(call.init.method, "DELETE");
   assertStringIncludes(call.url, "/vpc/v2/regions/fr-par/vpcs/");
   assertStringIncludes(call.url, G.vpcId);
+  assertEquals(writes.length, 1);
+  assertEquals(writes[0].spec, "vpc");
+  assertEquals(writes[0].name, G.vpcId);
+  assertEquals(writes[0].data.absent, true);
+  assertEquals(writes[0].data.id, G.vpcId);
+  assertEquals(result.dataHandles.length, 1);
+});
+
+Deno.test("delete treats a 404 as success and still writes an absent snapshot", async () => {
+  const { ctx, writes } = makeContext();
+  const result = await withMockedFetch(
+    () =>
+      new Response(JSON.stringify({ message: "not found" }), { status: 404 }),
+    () => model.methods.delete.execute({}, ctx),
+  );
+  assertEquals(writes.length, 1);
+  assertEquals(writes[0].spec, "vpc");
+  assertEquals(writes[0].name, G.vpcId);
+  assertEquals(writes[0].data.absent, true);
+  assertEquals(result.dataHandles.length, 1);
+});
+
+Deno.test("delete re-throws non-404 errors and writes nothing", async () => {
+  const { ctx, writes } = makeContext();
+  let threw = false;
+  await withMockedFetch(
+    () => new Response(JSON.stringify({ message: "boom" }), { status: 500 }),
+    async () => {
+      try {
+        await model.methods.delete.execute({}, ctx);
+      } catch (e) {
+        threw = true;
+        assertStringIncludes((e as Error).message, "500");
+      }
+    },
+  );
+  assert(threw);
   assertEquals(writes.length, 0);
-  assertEquals(result.dataHandles.length, 0);
+});
+
+Deno.test("update PATCHes mutable fields and snapshots under vpcId", async () => {
+  const { ctx, writes } = makeContext();
+  let captured: { url: string; init: RequestInit } | null = null;
+  await withMockedFetch(
+    (url, init) => {
+      captured = { url, init };
+      return new Response(
+        JSON.stringify({
+          id: G.vpcId,
+          name: "renamed-vpc",
+          region: "fr-par",
+          tags: ["env=prod"],
+          routing_enabled: true,
+        }),
+        { status: 200 },
+      );
+    },
+    () =>
+      model.methods.update.execute(
+        { name: "renamed-vpc", tags: ["env=prod"], enableRouting: true },
+        ctx,
+      ),
+  );
+  const call = captured as unknown as { url: string; init: RequestInit };
+  assertEquals(call.init.method, "PATCH");
+  assertStringIncludes(call.url, `/vpc/v2/regions/fr-par/vpcs/${G.vpcId}`);
+  const sent = JSON.parse(String(call.init.body));
+  assertEquals(sent.name, "renamed-vpc");
+  assertEquals(sent.tags, ["env=prod"]);
+  assertEquals(sent.enable_routing, true);
+  assertEquals(writes.length, 1);
+  assertEquals(writes[0].spec, "vpc");
+  assertEquals(writes[0].name, G.vpcId);
+  assertEquals(writes[0].data.name, "renamed-vpc");
+  assertEquals(writes[0].data.routingEnabled, true);
+  assertEquals(writes[0].data.tags, ["env=prod"]);
+});
+
+Deno.test("update omits unset fields from the PATCH body", async () => {
+  const { ctx } = makeContext();
+  let captured: { url: string; init: RequestInit } | null = null;
+  await withMockedFetch(
+    (url, init) => {
+      captured = { url, init };
+      return new Response(
+        JSON.stringify({ id: G.vpcId, region: "fr-par", tags: [] }),
+        { status: 200 },
+      );
+    },
+    () => model.methods.update.execute({ name: "only-name" }, ctx),
+  );
+  const call = captured as unknown as { url: string; init: RequestInit };
+  const sent = JSON.parse(String(call.init.body));
+  assertEquals(sent.name, "only-name");
+  assertEquals("tags" in sent, false);
+  assertEquals("enable_routing" in sent, false);
+});
+
+Deno.test("valid-region check passes for allowed regions and fails otherwise", () => {
+  const ok = model.checks["valid-region"].execute({ globalArgs: G });
+  assertEquals(ok.pass, true);
+  const bad = model.checks["valid-region"].execute({
+    globalArgs: { ...G, region: "us-east-1" },
+  });
+  assertEquals(bad.pass, false);
+  assert((bad.errors ?? []).length > 0);
+  assertStringIncludes((bad.errors ?? [])[0], "us-east-1");
 });
 
 Deno.test("list aggregates pages until total_count is reached", async () => {

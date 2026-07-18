@@ -55,7 +55,10 @@ Deno.test("SigV4 known-answer: AWS S3 GET Object example reproduces the document
 
   // The signing/string-to-sign path must yield AWS's documented signature.
   assertEquals(result.signature, AWS_EXPECTED_SIGNATURE);
-  assertEquals(result.signedHeaders, "host;range;x-amz-content-sha256;x-amz-date");
+  assertEquals(
+    result.signedHeaders,
+    "host;range;x-amz-content-sha256;x-amz-date",
+  );
   assertStringIncludes(
     result.authorization,
     "AWS4-HMAC-SHA256 Credential=AKIAIOSFODNN7EXAMPLE/20130524/us-east-1/s3/aws4_request",
@@ -189,10 +192,11 @@ async function withMockedFetch<T>(
   fn: () => Promise<T>,
 ): Promise<T> {
   const original = globalThis.fetch;
-  globalThis.fetch = ((input: string | URL | Request, init?: RequestInit) =>
-    Promise.resolve(
-      handler(String(input), init ?? {}),
-    )) as typeof globalThis.fetch;
+  globalThis.fetch =
+    ((input: string | URL | Request, init?: RequestInit) =>
+      Promise.resolve(
+        handler(String(input), init ?? {}),
+      )) as typeof globalThis.fetch;
   try {
     return await fn();
   } finally {
@@ -228,7 +232,7 @@ Deno.test("list-buckets GETs the service root and parses the bucket XML", async 
   assertEquals(writes[0].data.region, "fr-par");
 });
 
-Deno.test("create-bucket PUTs to /{bucket} with a SigV4 Authorization header", async () => {
+Deno.test("create PUTs to /{bucket} with a SigV4 Authorization header", async () => {
   const { ctx, writes } = makeContext();
   let captured: { url: string; init: RequestInit } | null = null;
   await withMockedFetch(
@@ -236,7 +240,7 @@ Deno.test("create-bucket PUTs to /{bucket} with a SigV4 Authorization header", a
       captured = { url, init };
       return new Response("", { status: 200 });
     },
-    () => model.methods["create-bucket"].execute({}, ctx),
+    () => model.methods["create"].execute({}, ctx),
   );
   const call = captured as unknown as { url: string; init: RequestInit };
   assertEquals(call.init.method, "PUT");
@@ -254,7 +258,7 @@ Deno.test("create-bucket PUTs to /{bucket} with a SigV4 Authorization header", a
   assertEquals(writes[0].data.exists, true);
 });
 
-Deno.test("delete-bucket DELETEs /{bucket} and records exists=false", async () => {
+Deno.test("delete DELETEs /{bucket} and records exists=false", async () => {
   const { ctx, writes } = makeContext();
   let method = "";
   await withMockedFetch(
@@ -262,9 +266,41 @@ Deno.test("delete-bucket DELETEs /{bucket} and records exists=false", async () =
       method = String(init.method ?? "");
       return new Response(null, { status: 204 });
     },
-    () => model.methods["delete-bucket"].execute({}, ctx),
+    () => model.methods["delete"].execute({}, ctx),
   );
   assertEquals(method, "DELETE");
+  assertEquals(writes[0].data.exists, false);
+});
+
+Deno.test("create treats a 409 (BucketAlreadyOwnedByYou) as success and writes exists=true", async () => {
+  const { ctx, writes } = makeContext();
+  await withMockedFetch(
+    () =>
+      new Response(
+        "<Error><Code>BucketAlreadyOwnedByYou</Code></Error>",
+        { status: 409 },
+      ),
+    () => model.methods["create"].execute({}, ctx),
+  );
+  assertEquals(writes.length, 1, "must still write a snapshot on 409");
+  assertEquals(writes[0].spec, "bucket");
+  assertEquals(writes[0].name, "my-bucket");
+  assertEquals(writes[0].data.exists, true);
+});
+
+Deno.test("delete treats a 404 (NoSuchBucket) as success and writes exists=false", async () => {
+  const { ctx, writes } = makeContext();
+  await withMockedFetch(
+    () =>
+      new Response(
+        "<Error><Code>NoSuchBucket</Code></Error>",
+        { status: 404 },
+      ),
+    () => model.methods["delete"].execute({}, ctx),
+  );
+  assertEquals(writes.length, 1, "must still write a snapshot on 404");
+  assertEquals(writes[0].spec, "bucket");
+  assertEquals(writes[0].name, "my-bucket");
   assertEquals(writes[0].data.exists, false);
 });
 

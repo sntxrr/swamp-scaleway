@@ -254,6 +254,30 @@ export const model = {
       garbageCollection: 20,
     },
   },
+  checks: {
+    "valid-region": {
+      description:
+        "Ensure the target region is one of Scaleway's supported RDB regions.",
+      labels: ["policy"],
+      execute: (
+        context: { globalArgs: GlobalArgs },
+      ): { pass: boolean; errors?: string[] } => {
+        const allowed = ["fr-par", "nl-ams", "pl-waw"];
+        const region = context.globalArgs.region;
+        if (!allowed.includes(region)) {
+          return {
+            pass: false,
+            errors: [
+              `Region "${region}" is not an allowed Scaleway region: ${
+                allowed.join(", ")
+              }`,
+            ],
+          };
+        }
+        return { pass: true };
+      },
+    },
+  },
   methods: {
     sync: {
       description: "Fetch the database instance's current state (GetInstance).",
@@ -271,9 +295,10 @@ export const model = {
         );
         const handle = await context.writeResource(
           "instance",
-          "latest",
+          g.instanceId,
           toInstanceResource(res, g, new Date().toISOString()),
         );
+        logger.info("Synced Scaleway RDB instance {id}", { id: g.instanceId });
         return { dataHandles: [handle] };
       },
     },
@@ -310,11 +335,16 @@ export const model = {
           instancesPath(g),
           body,
         );
+        const newId = (res.id as string) ?? g.instanceId;
         const handle = await context.writeResource(
           "instance",
-          (res.id as string) ?? "latest",
+          newId,
           toInstanceResource(res, g, new Date().toISOString()),
         );
+        logger.info("Created Scaleway RDB instance {id} in {region}", {
+          id: newId,
+          region: g.region,
+        });
         return { dataHandles: [handle] };
       },
     },
@@ -341,9 +371,10 @@ export const model = {
         );
         const handle = await context.writeResource(
           "instance",
-          "latest",
+          g.instanceId,
           toInstanceResource(res, g, new Date().toISOString()),
         );
+        logger.info("Updated Scaleway RDB instance {id}", { id: g.instanceId });
         return { dataHandles: [handle] };
       },
     },
@@ -358,20 +389,37 @@ export const model = {
         logger.info("Deleting Scaleway RDB instance {id}", {
           id: g.instanceId,
         });
-        const res = await scalewayFetch<Record<string, unknown>>(
-          g,
-          "DELETE",
-          `${instancesPath(g)}/${encodeURIComponent(g.instanceId)}`,
-        );
+        // Idempotent delete: a 404 means the instance is already gone — treat
+        // it as success and record an absent snapshot (CONVENTIONS.md §3.2).
+        let res: Record<string, unknown> | undefined;
+        let absent = false;
+        try {
+          res = await scalewayFetch<Record<string, unknown>>(
+            g,
+            "DELETE",
+            `${instancesPath(g)}/${encodeURIComponent(g.instanceId)}`,
+          );
+        } catch (e) {
+          if ((e as { status?: number }).status !== 404) throw e;
+          absent = true;
+        }
+        const observedAt = new Date().toISOString();
+        const snapshot = absent
+          ? toInstanceResource(
+            { id: g.instanceId, status: "absent" },
+            g,
+            observedAt,
+          )
+          : toInstanceResource(res ?? { id: g.instanceId }, g, observedAt);
         const handle = await context.writeResource(
           "instance",
-          "latest",
-          toInstanceResource(
-            res ?? { id: g.instanceId },
-            g,
-            new Date().toISOString(),
-          ),
+          g.instanceId,
+          snapshot,
         );
+        logger.info("Deleted Scaleway RDB instance {id} (absent={absent})", {
+          id: g.instanceId,
+          absent,
+        });
         return { dataHandles: [handle] };
       },
     },

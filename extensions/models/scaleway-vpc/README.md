@@ -12,7 +12,8 @@ Authenticated with the `X-Auth-Token` header (secret key wired from a vault).
 | ----------------------- | -------------------------------------------------------------------- |
 | `sync`                  | Fetch the VPC's current state (`GetVPC`) and store a snapshot         |
 | `create`                | Provision a new VPC (`CreateVPC`) and snapshot it, including its ID   |
-| `delete`                | Deprovision the VPC (`DeleteVPC`)                                     |
+| `update`                | Mutate the VPC's name, tags, or routing (`UpdateVPC`) and snapshot it |
+| `delete`                | Deprovision the VPC (`DeleteVPC`); a 404 is treated as already gone   |
 | `list`                  | Factory discovery — snapshot every VPC in the region (paginated)     |
 | `list-private-networks` | Factory discovery — snapshot every Private Network in the region     |
 
@@ -36,14 +37,19 @@ swamp model create @sntxrr/scaleway-vpc prod-vpc \
 ```bash
 swamp model @sntxrr/scaleway-vpc method run sync prod-vpc
 swamp model @sntxrr/scaleway-vpc method run create prod-vpc --input name=new-vpc
+swamp model @sntxrr/scaleway-vpc method run update prod-vpc --input name=renamed-vpc
 swamp model @sntxrr/scaleway-vpc method run list prod-vpc
 swamp model @sntxrr/scaleway-vpc method run list-private-networks prod-vpc
 swamp model @sntxrr/scaleway-vpc method run delete prod-vpc
 ```
 
 `sync`, `list`, and `list-private-networks` are read-only. `create` writes a
-snapshot including the new VPC's ID; `delete` deprovisions the VPC keyed by
-`vpcId` — verify the ID first with `swamp model get --json`.
+snapshot including the new VPC's ID; `update` mutates the VPC's name, tags, or
+routing and re-snapshots it; `delete` deprovisions the VPC keyed by `vpcId` (a
+`404` is treated as already gone) and writes an absent snapshot — verify the ID
+first with `swamp model get --json`. A labeled `valid-region` pre-flight check
+runs before `create`/`update`/`delete`, rejecting any `region` outside
+`fr-par`, `nl-ams`, `pl-waw`.
 
 ## Global arguments
 

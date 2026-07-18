@@ -235,6 +235,40 @@ export const model = {
       garbageCollection: 20,
     },
   },
+  checks: {
+    "valid-zone": {
+      description:
+        "Ensure the configured zone is one of the nine Scaleway zones.",
+      labels: ["policy"],
+      execute: (
+        context: { globalArgs: GlobalArgs },
+      ): { pass: boolean; errors?: string[] } => {
+        const allowed = [
+          "fr-par-1",
+          "fr-par-2",
+          "fr-par-3",
+          "nl-ams-1",
+          "nl-ams-2",
+          "nl-ams-3",
+          "pl-waw-1",
+          "pl-waw-2",
+          "pl-waw-3",
+        ];
+        const zone = context.globalArgs.zone;
+        if (!allowed.includes(zone)) {
+          return {
+            pass: false,
+            errors: [
+              `Zone "${zone}" is not a valid Scaleway zone (allowed: ${
+                allowed.join(", ")
+              }).`,
+            ],
+          };
+        }
+        return { pass: true };
+      },
+    },
+  },
   methods: {
     sync: {
       description: "Fetch the volume's current state (GetVolume).",
@@ -252,9 +286,13 @@ export const model = {
         );
         const handle = await context.writeResource(
           "volume",
-          "latest",
+          g.volumeId,
           toVolumeResource(res, g, new Date().toISOString()),
         );
+        logger.info("Synced Scaleway volume {id} (status {status})", {
+          id: g.volumeId,
+          status: (res.status as string) ?? "unknown",
+        });
         return { dataHandles: [handle] };
       },
     },
@@ -290,9 +328,13 @@ export const model = {
         );
         const handle = await context.writeResource(
           "volume",
-          (res.id as string) ?? "latest",
+          (res.id as string) ?? g.volumeId,
           toVolumeResource(res, g, new Date().toISOString()),
         );
+        logger.info("Created Scaleway volume {id} ({name})", {
+          id: (res.id as string) ?? "unknown",
+          name: args.name,
+        });
         return { dataHandles: [handle] };
       },
     },
@@ -319,9 +361,13 @@ export const model = {
         );
         const handle = await context.writeResource(
           "volume",
-          "latest",
+          g.volumeId,
           toVolumeResource(res, g, new Date().toISOString()),
         );
+        logger.info("Updated Scaleway volume {id} (status {status})", {
+          id: g.volumeId,
+          status: (res.status as string) ?? "unknown",
+        });
         return { dataHandles: [handle] };
       },
     },
@@ -334,21 +380,32 @@ export const model = {
       ): Promise<{ dataHandles: Array<{ name: string }> }> => {
         const { globalArgs: g, logger } = context;
         logger.info("Deleting Scaleway volume {id}", { id: g.volumeId });
-        await scalewayFetch(
-          g,
-          "DELETE",
-          `${volumesPath(g)}/${encodeURIComponent(g.volumeId)}`,
-        );
+        let alreadyGone = false;
+        try {
+          await scalewayFetch(
+            g,
+            "DELETE",
+            `${volumesPath(g)}/${encodeURIComponent(g.volumeId)}`,
+          );
+        } catch (e) {
+          // 404 => the volume is already gone; treat delete as idempotent.
+          if ((e as { status?: number }).status !== 404) throw e;
+          alreadyGone = true;
+        }
         const handle = await context.writeResource(
           "volume",
-          "latest",
+          g.volumeId,
           {
             id: g.volumeId,
             zone: g.zone,
-            status: "deleting",
+            status: alreadyGone ? "absent" : "deleting",
             observedAt: new Date().toISOString(),
           },
         );
+        logger.info("Deleted Scaleway volume {id} ({state})", {
+          id: g.volumeId,
+          state: alreadyGone ? "already absent" : "deleting",
+        });
         return { dataHandles: [handle] };
       },
     },

@@ -3,7 +3,7 @@
  *
  * Wraps the Scaleway Object Storage S3 API (`https://s3.<region>.scw.cloud`) so a
  * swamp model manages an S3 bucket, keyed by its bucket name. Exposes
- * `list-buckets` (factory), `create-bucket`, `delete-bucket`, `sync`
+ * `list-buckets` (factory), `create`, `delete`, `sync`
  * (confirm existence/region), and `list-objects` (factory, paginated via
  * ListObjectsV2 continuation tokens).
  *
@@ -41,7 +41,7 @@ const GlobalArgsSchema = z.object({
     "Object Storage region: fr-par, nl-ams, or pl-waw. Selects the s3.<region>.scw.cloud endpoint and is part of the SigV4 credential scope.",
   ),
   bucket: z.string().describe(
-    "Name of the bucket this model manages. Used by create-bucket, delete-bucket, sync, and list-objects; ignored by the list-buckets factory.",
+    "Name of the bucket this model manages. Used by create, delete, sync, and list-objects; ignored by the list-buckets factory.",
   ),
   endpoint: z.string().optional().describe(
     "Override the S3 endpoint base URL. Defaults to https://s3.<region>.scw.cloud.",
@@ -64,7 +64,7 @@ const BucketSchema = z.object({
     "ISO-8601 creation timestamp, when reported by ListBuckets.",
   ),
   exists: z.boolean().describe(
-    "Whether the bucket exists as of observedAt (false after delete-bucket).",
+    "Whether the bucket exists as of observedAt (false after delete).",
   ),
   observedAt: z.string().describe("ISO-8601 time this snapshot was taken."),
 });
@@ -257,7 +257,10 @@ function s3BaseUrl(g: GlobalArgs): string {
 
 /**
  * Perform a SigV4-signed S3 request (path-style, empty body) and return the raw
- * status/text/headers. Throws on a non-2xx response so callers write nothing.
+ * status/text/headers. On a non-2xx response it throws an
+ * `Error & { status: number }` (with the HTTP status attached as `err.status`)
+ * so callers can branch on it (e.g. 409/404 idempotency) and otherwise write
+ * nothing. Mirrors the canonical `scalewayFetch` error contract.
  */
 async function s3Request(
   g: GlobalArgs,
@@ -302,9 +305,11 @@ async function s3Request(
   });
   const text = await res.text();
   if (res.status < 200 || res.status >= 300) {
-    throw new Error(
+    const err = new Error(
       `Scaleway S3 ${method} ${path} failed (${res.status}): ${text}`,
-    );
+    ) as Error & { status: number };
+    err.status = res.status;
+    throw err;
   }
   return { status: res.status, text, headers: res.headers };
 }
@@ -447,6 +452,9 @@ function toObjectResource(
 // Model definition
 // ---------------------------------------------------------------------------
 
+/** The three Scaleway Object Storage regions valid for the `region` global arg. */
+const SCALEWAY_REGIONS: readonly string[] = ["fr-par", "nl-ams", "pl-waw"];
+
 /**
  * Scaleway Object Storage model — manages one S3 bucket (keyed by `bucket`) and
  * can discover all buckets / all objects. Authenticated with AWS SigV4.
@@ -499,8 +507,9 @@ export const model = {
         return { dataHandles: handles };
       },
     },
-    "create-bucket": {
-      description: "Create the managed bucket (PUT /{bucket}).",
+    "create": {
+      description:
+        "Create the managed bucket (PUT /{bucket}). Idempotent: a 409 (BucketAlreadyOwnedByYou / BucketAlreadyExists) is treated as success.",
       arguments: z.object({}),
       execute: async (
         _args: Record<string, never>,
@@ -511,18 +520,35 @@ export const model = {
           bucket: g.bucket,
           region: g.region,
         });
-        await s3Request(g, "PUT", `/${g.bucket}`);
+        try {
+          await s3Request(g, "PUT", `/${g.bucket}`);
+        } catch (e) {
+          // A 409 means the bucket already exists and is owned by these
+          // credentials (BucketAlreadyOwnedByYou / BucketAlreadyExists) — the
+          // desired end state, so treat it as an idempotent success.
+          if ((e as { status?: number }).status !== 409) throw e;
+          logger.info(
+            "Bucket {bucket} already exists (409); treating as created",
+            {
+              bucket: g.bucket,
+            },
+          );
+        }
         const handle = await context.writeResource(
           "bucket",
           g.bucket,
           toBucketResource(g, g.bucket, true, null, new Date().toISOString()),
         );
+        logger.info("Created bucket {bucket} in {region}", {
+          bucket: g.bucket,
+          region: g.region,
+        });
         return { dataHandles: [handle] };
       },
     },
-    "delete-bucket": {
+    "delete": {
       description:
-        "Delete the managed bucket (DELETE /{bucket}). The bucket must be empty.",
+        "Delete the managed bucket (DELETE /{bucket}). The bucket must be empty. Idempotent: a 404 (NoSuchBucket) is treated as success.",
       arguments: z.object({}),
       execute: async (
         _args: Record<string, never>,
@@ -533,12 +559,28 @@ export const model = {
           bucket: g.bucket,
           region: g.region,
         });
-        await s3Request(g, "DELETE", `/${g.bucket}`);
+        try {
+          await s3Request(g, "DELETE", `/${g.bucket}`);
+        } catch (e) {
+          // A 404 (NoSuchBucket) means the bucket is already gone — the desired
+          // end state, so treat it as an idempotent success.
+          if ((e as { status?: number }).status !== 404) throw e;
+          logger.info(
+            "Bucket {bucket} already absent (404); treating as deleted",
+            {
+              bucket: g.bucket,
+            },
+          );
+        }
         const handle = await context.writeResource(
           "bucket",
           g.bucket,
           toBucketResource(g, g.bucket, false, null, new Date().toISOString()),
         );
+        logger.info("Deleted bucket {bucket} in {region}", {
+          bucket: g.bucket,
+          region: g.region,
+        });
         return { dataHandles: [handle] };
       },
     },
@@ -568,6 +610,10 @@ export const model = {
             region,
           },
         );
+        logger.info("Synced bucket {bucket} in {region}", {
+          bucket: g.bucket,
+          region,
+        });
         return { dataHandles: [handle] };
       },
     },
@@ -611,6 +657,29 @@ export const model = {
       },
     },
   },
+  checks: {
+    "valid-region": {
+      description:
+        "Ensure globalArgs.region is one of the three Scaleway Object Storage regions (fr-par, nl-ams, pl-waw). Runs before create/delete.",
+      labels: ["policy"],
+      execute: (
+        context: { globalArgs: GlobalArgs },
+      ): { pass: boolean; errors?: string[] } => {
+        const region = context.globalArgs.region;
+        if (!SCALEWAY_REGIONS.includes(region)) {
+          return {
+            pass: false,
+            errors: [
+              `Region "${region}" is not a valid Scaleway Object Storage region. Allowed: ${
+                SCALEWAY_REGIONS.join(", ")
+              }.`,
+            ],
+          };
+        }
+        return { pass: true };
+      },
+    },
+  },
 };
 
 /**
@@ -635,4 +704,5 @@ export const _internal = {
   toBucketResource,
   toObjectResource,
   EMPTY_SHA256,
+  SCALEWAY_REGIONS,
 };

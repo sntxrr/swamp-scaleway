@@ -66,7 +66,7 @@ Deno.test("sync GETs the LB and maps the resource with the auth header", async (
           id: G.lbId,
           name: "lb-1",
           status: "ready",
-          ip: [{ ip_address: "51.15.1.1" }],
+          ip: [{ ip_address: "203.0.113.10" }],
           frontend_count: 2,
           backend_count: 3,
         }),
@@ -83,8 +83,9 @@ Deno.test("sync GETs the LB and maps the resource with the auth header", async (
     G.secretKey,
   );
   assertEquals(writes[0].spec, "loadBalancer");
+  assertEquals(writes[0].name, G.lbId);
   assertEquals(writes[0].data.status, "ready");
-  assertEquals(writes[0].data.publicIp, "51.15.1.1");
+  assertEquals(writes[0].data.publicIp, "203.0.113.10");
   assertEquals(writes[0].data.frontendCount, 2);
 });
 
@@ -108,11 +109,12 @@ Deno.test("create POSTs the body with project_id and maps the new LB", async () 
   assertEquals(body.project_id, G.projectId);
   assertEquals(body.name, "web-lb");
   assertEquals(body.type, "LB-S");
+  assertEquals(writes[0].name, "new-lb");
   assertEquals(writes[0].data.id, "new-lb");
   assertEquals(writes[0].data.status, "pending");
 });
 
-Deno.test("delete DELETEs with release_ip and writes a deleting snapshot", async () => {
+Deno.test("delete DELETEs with release_ip and writes an absent snapshot under lbId", async () => {
   const { ctx, writes } = makeContext();
   let captured: { url: string; init: RequestInit } | null = null;
   await withMockedFetch(
@@ -126,7 +128,85 @@ Deno.test("delete DELETEs with release_ip and writes a deleting snapshot", async
   assertEquals(call.init.method, "DELETE");
   assertStringIncludes(call.url, "/lb/v1/zones/fr-par-1/lbs/");
   assertStringIncludes(call.url, "release_ip=true");
-  assertEquals(writes[0].data.status, "deleting");
+  assertEquals(writes[0].name, G.lbId);
+  assertEquals(writes[0].data.status, "absent");
+});
+
+Deno.test("delete treats a 404 as success and writes an absent snapshot", async () => {
+  const { ctx, writes } = makeContext();
+  await withMockedFetch(
+    () =>
+      new Response(JSON.stringify({ message: "not found" }), { status: 404 }),
+    () => model.methods.delete.execute({ releaseIp: false }, ctx),
+  );
+  assertEquals(writes.length, 1);
+  assertEquals(writes[0].name, G.lbId);
+  assertEquals(writes[0].data.status, "absent");
+});
+
+Deno.test("delete re-throws non-404 errors", async () => {
+  const { ctx, writes } = makeContext();
+  let threw = false;
+  await withMockedFetch(
+    () => new Response(JSON.stringify({ message: "boom" }), { status: 500 }),
+    async () => {
+      try {
+        await model.methods.delete.execute({ releaseIp: false }, ctx);
+      } catch (e) {
+        threw = true;
+        assertStringIncludes((e as Error).message, "500");
+      }
+    },
+  );
+  assert(threw);
+  assertEquals(writes.length, 0);
+});
+
+Deno.test("update PUTs mutable fields and maps the response under lbId", async () => {
+  const { ctx, writes } = makeContext();
+  let captured: { url: string; init: RequestInit } | null = null;
+  await withMockedFetch(
+    (url, init) => {
+      captured = { url, init };
+      return new Response(
+        JSON.stringify({
+          id: G.lbId,
+          name: "renamed-lb",
+          description: "updated",
+          status: "ready",
+          tags: ["prod"],
+        }),
+        { status: 200 },
+      );
+    },
+    () =>
+      model.methods.update.execute(
+        { name: "renamed-lb", description: "updated", tags: ["prod"] },
+        ctx,
+      ),
+  );
+  const call = captured as unknown as { url: string; init: RequestInit };
+  assertEquals(call.init.method, "PUT");
+  assertStringIncludes(call.url, "/lb/v1/zones/fr-par-1/lbs/");
+  const body = JSON.parse(String(call.init.body));
+  assertEquals(body.name, "renamed-lb");
+  assertEquals(body.description, "updated");
+  assertEquals(body.tags, ["prod"]);
+  assertEquals(writes[0].name, G.lbId);
+  assertEquals(writes[0].data.name, "renamed-lb");
+  assertEquals(writes[0].data.status, "ready");
+});
+
+Deno.test("valid-zone check passes for a real zone and fails otherwise", () => {
+  assertEquals(
+    model.checks["valid-zone"].execute({ globalArgs: G }).pass,
+    true,
+  );
+  const bad = model.checks["valid-zone"].execute({
+    globalArgs: { ...G, zone: "us-east-1" },
+  });
+  assertEquals(bad.pass, false);
+  assert((bad.errors ?? []).length > 0);
 });
 
 Deno.test("list aggregates pages until total_count is reached", async () => {

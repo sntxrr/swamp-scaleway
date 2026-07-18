@@ -16,7 +16,7 @@ Authenticated with the `X-Auth-Token` header (secret key wired from a vault).
 | `sync`         | Fetch every DNS record in the zone (`ListDNSZoneRecords`) and store a snapshot per record |
 | `list-records` | Alias of `sync` — snapshot every DNS record in the zone (paginated)         |
 | `list-zones`   | Factory discovery — snapshot every DNS zone in the project (paginated)      |
-| `set-records`  | Apply a batch of `add`/`set`/`delete`/`clear` record changes to the zone (PATCH), then snapshot the returned records |
+| `update`       | Apply a batch of `add`/`set`/`delete`/`clear` record changes to the zone (PATCH), then snapshot the returned records. A `zone-specified` pre-flight check runs first. |
 
 ## Setup
 
@@ -40,13 +40,15 @@ swamp model @sntxrr/scaleway-dns method run list-records example-com
 swamp model @sntxrr/scaleway-dns method run list-zones example-com
 
 # Add a record (changes is the PATCH body's "changes" array, passed through verbatim)
-swamp model @sntxrr/scaleway-dns method run set-records example-com \
-  --input 'changes=[{"add":{"records":[{"name":"www","type":"A","data":"1.2.3.4","ttl":300}]}}]'
+swamp model @sntxrr/scaleway-dns method run update example-com \
+  --input 'changes=[{"add":{"records":[{"name":"www","type":"A","data":"192.0.2.10","ttl":300}]}}]'
 ```
 
-`sync`, `list-records`, and `list-zones` are read-only. `set-records` mutates the
+`sync`, `list-records`, and `list-zones` are read-only. `update` mutates the
 zone; each change object holds exactly one of `add` (`{ records }`), `set`
-(`{ id_fields, records }`), `delete` (`{ id_fields }`) or `clear` (`{}`).
+(`{ id_fields, records }`), `delete` (`{ id_fields }`) or `clear` (`{}`). Because
+it is named `update`, the labeled `zone-specified` pre-flight check auto-fires
+before it runs and fails fast if `dnsZone` is empty.
 
 ## Global arguments
 

@@ -3,9 +3,10 @@
  *
  * Wraps the Scaleway VPC API (`/vpc/v2`, regional) so a swamp model represents a
  * single Virtual Private Cloud, keyed by its VPC ID. Exposes `sync`, `create`,
- * `delete`, a factory `list` over the region's VPCs, and a factory
+ * `update`, `delete`, a factory `list` over the region's VPCs, and a factory
  * `list-private-networks` over the region's Private Networks. Authenticated with
- * the `X-Auth-Token` header (secret key wired from a vault).
+ * the `X-Auth-Token` header (secret key wired from a vault). A labeled
+ * `valid-region` pre-flight check gates the mutating methods.
  *
  * API reference: https://www.scaleway.com/en/developers/api/vpc/
  * @module
@@ -39,6 +40,19 @@ const CreateArgsSchema = z.object({
   ),
 });
 
+const UpdateArgsSchema = z.object({
+  name: z.string().optional().describe("New name for the VPC."),
+  tags: z.array(z.string()).optional().describe(
+    "Replacement set of tags for the VPC.",
+  ),
+  enableRouting: z.boolean().optional().describe(
+    "Enable routing between the VPC's Private Networks.",
+  ),
+});
+
+/** Valid Scaleway VPC regions (regional scope). */
+const SCALEWAY_REGIONS: readonly string[] = ["fr-par", "nl-ams", "pl-waw"];
+
 const VpcSchema = z.object({
   id: z.string().describe("VPC ID (UUID)."),
   name: z.string().nullable().optional().describe("VPC name."),
@@ -67,6 +81,9 @@ const VpcSchema = z.object({
   ),
   observedAt: z.string().describe(
     "RFC 3339 timestamp when this snapshot was taken.",
+  ),
+  absent: z.boolean().nullable().optional().describe(
+    "True when this snapshot records that the VPC no longer exists (deleted).",
   ),
 });
 
@@ -273,9 +290,10 @@ export const model = {
         );
         const handle = await context.writeResource(
           "vpc",
-          "latest",
+          g.vpcId,
           toVpcResource(res, g, new Date().toISOString()),
         );
+        logger.info("Synced Scaleway VPC {id}", { id: g.vpcId });
         return { dataHandles: [handle] };
       },
     },
@@ -305,11 +323,47 @@ export const model = {
           vpcsPath(g),
           body,
         );
+        const newId = (res.id as string) ?? g.vpcId;
         const handle = await context.writeResource(
           "vpc",
-          (res.id as string) ?? "latest",
+          newId,
           toVpcResource(res, g, new Date().toISOString()),
         );
+        logger.info("Created Scaleway VPC {id} in {region}", {
+          id: newId,
+          region: g.region,
+        });
+        return { dataHandles: [handle] };
+      },
+    },
+    update: {
+      description:
+        "Mutate the VPC's mutable fields (UpdateVPC) and snapshot it.",
+      arguments: UpdateArgsSchema,
+      execute: async (
+        args: z.infer<typeof UpdateArgsSchema>,
+        context: ExecuteContext,
+      ): Promise<{ dataHandles: Array<{ name: string }> }> => {
+        const { globalArgs: g, logger } = context;
+        logger.info("Updating Scaleway VPC {id}", { id: g.vpcId });
+        const body: Record<string, unknown> = {};
+        if (args.name !== undefined) body.name = args.name;
+        if (args.tags !== undefined) body.tags = args.tags;
+        if (args.enableRouting !== undefined) {
+          body.enable_routing = args.enableRouting;
+        }
+        const res = await scalewayFetch<Record<string, unknown>>(
+          g,
+          "PATCH",
+          `${vpcsPath(g)}/${encodeURIComponent(g.vpcId)}`,
+          body,
+        );
+        const handle = await context.writeResource(
+          "vpc",
+          g.vpcId,
+          toVpcResource(res, g, new Date().toISOString()),
+        );
+        logger.info("Updated Scaleway VPC {id}", { id: g.vpcId });
         return { dataHandles: [handle] };
       },
     },
@@ -322,12 +376,25 @@ export const model = {
       ): Promise<{ dataHandles: Array<{ name: string }> }> => {
         const { globalArgs: g, logger } = context;
         logger.info("Deleting Scaleway VPC {id}", { id: g.vpcId });
-        await scalewayFetch(
-          g,
-          "DELETE",
-          `${vpcsPath(g)}/${encodeURIComponent(g.vpcId)}`,
+        try {
+          await scalewayFetch(
+            g,
+            "DELETE",
+            `${vpcsPath(g)}/${encodeURIComponent(g.vpcId)}`,
+          );
+        } catch (e) {
+          if ((e as { status?: number }).status !== 404) throw e;
+          logger.info("Scaleway VPC {id} already absent (404)", {
+            id: g.vpcId,
+          });
+        }
+        const handle = await context.writeResource(
+          "vpc",
+          g.vpcId,
+          { ...toVpcResource({}, g, new Date().toISOString()), absent: true },
         );
-        return { dataHandles: [] };
+        logger.info("Deleted Scaleway VPC {id}", { id: g.vpcId });
+        return { dataHandles: [handle] };
       },
     },
     list: {
@@ -393,6 +460,29 @@ export const model = {
       },
     },
   },
+  checks: {
+    "valid-region": {
+      description:
+        "Ensure globalArgs.region is one of the three Scaleway VPC regions.",
+      labels: ["policy"],
+      execute: (
+        context: { globalArgs: GlobalArgs },
+      ): { pass: boolean; errors?: string[] } => {
+        const region = context.globalArgs.region;
+        if (!SCALEWAY_REGIONS.includes(region)) {
+          return {
+            pass: false,
+            errors: [
+              `Region "${region}" is not a valid Scaleway region. Allowed: ${
+                SCALEWAY_REGIONS.join(", ")
+              }.`,
+            ],
+          };
+        }
+        return { pass: true };
+      },
+    },
+  },
 };
 
 /** Internal helpers exported only for unit testing. */
@@ -403,4 +493,5 @@ export const _internal = {
   toPrivateNetworkResource,
   vpcsPath,
   privateNetworksPath,
+  SCALEWAY_REGIONS,
 };

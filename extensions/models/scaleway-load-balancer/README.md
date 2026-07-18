@@ -15,6 +15,7 @@ with the `X-Auth-Token` header (secret key wired from a vault).
 | ---------------- | ---------------------------------------------------------------------------- |
 | `sync`           | Fetch the Load Balancer's current state (`GetLb`) and store a snapshot        |
 | `create`         | Provision a new Load Balancer (`CreateLb`) and snapshot it (including its ID) |
+| `update`         | Update the Load Balancer's `name`, `description`, or `tags` (`UpdateLb`)       |
 | `delete`         | Deprovision the Load Balancer (`DeleteLb`); optionally release its flexible IP |
 | `list`           | Factory discovery — snapshot every Load Balancer in the zone (paginated)      |
 | `list-backends`  | Factory discovery — snapshot every backend attached to this LB (paginated)    |
@@ -40,6 +41,7 @@ swamp model create @sntxrr/scaleway-load-balancer web-lb \
 ```bash
 swamp model @sntxrr/scaleway-load-balancer method run sync web-lb
 swamp model @sntxrr/scaleway-load-balancer method run create web-lb --input name=web-lb --input type=LB-S
+swamp model @sntxrr/scaleway-load-balancer method run update web-lb --input name=web-lb-2
 swamp model @sntxrr/scaleway-load-balancer method run delete web-lb --input releaseIp=true
 swamp model @sntxrr/scaleway-load-balancer method run list web-lb
 swamp model @sntxrr/scaleway-load-balancer method run list-backends web-lb

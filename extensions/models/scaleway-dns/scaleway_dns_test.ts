@@ -63,7 +63,7 @@ Deno.test("sync GETs zone records on a global path (no /zones/ or /regions/) wit
       return new Response(
         JSON.stringify({
           records: [
-            { id: "r1", name: "www", type: "A", data: "1.2.3.4", ttl: 300 },
+            { id: "r1", name: "www", type: "A", data: "192.0.2.10", ttl: 300 },
           ],
           total_count: 1,
         }),
@@ -87,7 +87,7 @@ Deno.test("sync GETs zone records on a global path (no /zones/ or /regions/) wit
   );
   assertEquals(writes[0].spec, "record");
   assertEquals(writes[0].data.type, "A");
-  assertEquals(writes[0].data.data, "1.2.3.4");
+  assertEquals(writes[0].data.data, "192.0.2.10");
   assertEquals(writes[0].data.dnsZone, "example.com");
 });
 
@@ -98,7 +98,7 @@ Deno.test("list-records aggregates record pages until total_count is reached", a
       const page = new URL(url).searchParams.get("page");
       const body = page === "1"
         ? {
-          records: [{ id: "a", name: "@", type: "A", data: "1.1.1.1" }],
+          records: [{ id: "a", name: "@", type: "A", data: "198.51.100.1" }],
           total_count: 2,
         }
         : {
@@ -148,7 +148,7 @@ Deno.test("list-zones lists dns-zones globally and maps snake_case to camelCase"
   assertEquals(writes[0].data.updatedAt, "2026-07-17T00:00:00Z");
 });
 
-Deno.test("set-records PATCHes the changes body and snapshots returned records", async () => {
+Deno.test("update PATCHes the changes body and snapshots returned records", async () => {
   const { ctx, writes } = makeContext();
   let captured: { url: string; init: RequestInit } | null = null;
   await withMockedFetch(
@@ -157,19 +157,21 @@ Deno.test("set-records PATCHes the changes body and snapshots returned records",
       return new Response(
         JSON.stringify({
           records: [
-            { id: "r9", name: "api", type: "A", data: "9.9.9.9", ttl: 60 },
+            { id: "r9", name: "api", type: "A", data: "203.0.113.9", ttl: 60 },
           ],
         }),
         { status: 200 },
       );
     },
     () =>
-      model.methods["set-records"].execute(
+      model.methods.update.execute(
         {
           changes: [
             {
               add: {
-                records: [{ name: "api", type: "A", data: "9.9.9.9", ttl: 60 }],
+                records: [
+                  { name: "api", type: "A", data: "203.0.113.9", ttl: 60 },
+                ],
               },
             },
           ],
@@ -190,7 +192,18 @@ Deno.test("set-records PATCHes the changes body and snapshots returned records",
   assertEquals(sent.return_all_records, true);
   assertEquals(sent.changes[0].add.records[0].name, "api");
   assertEquals(writes[0].spec, "record");
-  assertEquals(writes[0].data.data, "9.9.9.9");
+  assertEquals(writes[0].data.data, "203.0.113.9");
+});
+
+Deno.test("zone-specified check fails on blank dnsZone and passes when set", () => {
+  const fail = model.checks["zone-specified"].execute({
+    globalArgs: { ...G, dnsZone: "   " },
+  });
+  assertEquals(fail.pass, false);
+  assert((fail.errors ?? []).length > 0);
+
+  const ok = model.checks["zone-specified"].execute({ globalArgs: G });
+  assertEquals(ok.pass, true);
 });
 
 Deno.test("a non-2xx response throws and writes nothing", async () => {

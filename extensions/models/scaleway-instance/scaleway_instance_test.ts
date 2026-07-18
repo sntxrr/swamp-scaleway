@@ -80,6 +80,20 @@ Deno.test("sync GETs the server and maps the resource with the auth header", asy
   assertEquals(writes[0].data.state, "running");
 });
 
+Deno.test("sync writes the snapshot under the real serverId, not 'latest'", async () => {
+  const { ctx, writes } = makeContext();
+  await withMockedFetch(
+    () =>
+      new Response(
+        JSON.stringify({ server: { id: G.serverId, state: "running" } }),
+        { status: 200 },
+      ),
+    () => model.methods.sync.execute({}, ctx),
+  );
+  assertEquals(writes.length, 1);
+  assertEquals(writes[0].name, G.serverId);
+});
+
 Deno.test("action POSTs the verb then re-reads state", async () => {
   const { ctx, writes } = makeContext();
   const methods: string[] = [];
@@ -96,6 +110,28 @@ Deno.test("action POSTs the verb then re-reads state", async () => {
   assertEquals(methods[0], "POST");
   assertEquals(methods[1], "GET");
   assertEquals(writes[0].data.state, "starting");
+  assertEquals(writes[0].name, G.serverId);
+});
+
+Deno.test("action('terminate') POSTs once, skips the re-read GET, and writes a terminating snapshot", async () => {
+  const { ctx, writes } = makeContext();
+  const methods: string[] = [];
+  await withMockedFetch(
+    (_u, init) => {
+      methods.push(String(init.method ?? "GET"));
+      // A GET here would 404 (server gone) — assert it is never issued.
+      return new Response(JSON.stringify({}), { status: 200 });
+    },
+    () => model.methods.action.execute({ action: "terminate" }, ctx),
+  );
+  assertEquals(methods.length, 1);
+  assertEquals(methods[0], "POST");
+  assertEquals(writes.length, 1);
+  assertEquals(writes[0].name, G.serverId);
+  assertEquals(writes[0].data.state, "terminating");
+  assertEquals(writes[0].data.id, G.serverId);
+  assertEquals(writes[0].data.zone, G.zone);
+  assertEquals(writes[0].data.name, null);
 });
 
 Deno.test("list aggregates pages until total_count is reached", async () => {
@@ -130,4 +166,16 @@ Deno.test("a non-2xx response throws and writes nothing", async () => {
   );
   assert(threw);
   assertEquals(writes.length, 0);
+});
+
+Deno.test("valid-zone check passes for a real zone and fails for a bogus one", () => {
+  const pass = model.checks["valid-zone"].execute({ globalArgs: G });
+  assertEquals(pass.pass, true);
+
+  const fail = model.checks["valid-zone"].execute({
+    globalArgs: { ...G, zone: "us-east-1" },
+  });
+  assertEquals(fail.pass, false);
+  assert(fail.errors !== undefined && fail.errors.length > 0);
+  assertStringIncludes(fail.errors[0], "us-east-1");
 });
