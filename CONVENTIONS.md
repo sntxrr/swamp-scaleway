@@ -14,22 +14,37 @@ with an inline authed HTTP client, no SDK) — study it alongside this doc.
 ## 1. How a builder uses this doc
 
 1. Pick one service row from [`PRD.md`](./PRD.md) §6.
-2. Copy the **golden template** (§7) to `extensions/models/scaleway_<service>.ts`.
+2. Create your extension's **own directory**:
+   `extensions/models/scaleway-<service>/` (see layout below). Copy the **golden
+   template** (§7) to `scaleway_<service>.ts` inside it.
 3. Copy the **`scalewayFetch` / `scalewayListAll` helpers (§5) byte-identical** —
    do not "improve" them per-service; a change is a lead-driven sweep across all
    extensions.
 4. Fill in schemas, URL paths (from §4 + the live Scaleway API docs), and
    methods (§3 taxonomy).
-5. Copy the **test template** (§8) to `scaleway_<service>_test.ts`; mock `fetch`.
-6. Copy the **manifest / README / LICENSE templates** (§9).
+5. Copy the **test template** (§8) to `scaleway_<service>_test.ts` in the same
+   dir; mock `fetch`.
+6. Copy the **manifest / README / LICENSE templates** (§9) into the same dir.
 7. Run the **verification + publish sequence** (§10), including the Adversarial
    Review Gate.
 8. Tick every box in [`PRD.md`](./PRD.md) §8 Definition of Done.
 
-**File ownership:** each service owns distinct filenames
-(`scaleway_<service>.ts`, `scaleway_<service>_test.ts`,
-`manifests/scaleway-<service>.yaml`). No builder edits another's files. The root
-`README.md` index is lead-owned.
+**Layout — one isolated directory per extension (mandatory):**
+
+```
+extensions/models/scaleway-<service>/
+  scaleway_<service>.ts        # export const model  (discovered via extensions/models/**/*.ts)
+  scaleway_<service>_test.ts   # unit tests (excluded from loading)
+  manifest.yaml                # paths.base: manifest  → paths resolve to THIS dir
+  README.md                    # per-extension docs (additionalFiles)
+  LICENSE.md                   # MIT (additionalFiles)
+```
+
+**File ownership:** a builder touches **only files inside its own
+`extensions/models/scaleway-<service>/` directory** — this makes all 7 Wave 1
+builders fully parallel with zero merge contention. No builder edits another's
+files, `CONVENTIONS.md`, or the root `README.md` index (both lead-owned). The
+landed `scaleway-instance/` dir is the reference to mirror.
 
 ---
 
@@ -303,7 +318,7 @@ function toServerResource(
   g: GlobalArgs,
   observedAt: string,
 ): Record<string, unknown> {
-  const addr = (s.public_ip as Record<string, unknown> | null | undefined);
+  const addr = s.public_ip as Record<string, unknown> | null | undefined;
   return {
     id: (s.id as string) ?? g.serverId,
     name: (s.name as string) ?? null,
@@ -558,8 +573,9 @@ Deno.test("a non-2xx response throws and writes nothing", async () => {
 
 ## 9. Manifest / README / LICENSE templates
 
-**`manifests/scaleway-<service>.yaml`** (set `paths.base` if you adopt a
-per-service subdir layout; default resolves paths relative to `extensions/`):
+**`extensions/models/scaleway-<service>/manifest.yaml`** — `paths.base: manifest`
+makes `models:` and `additionalFiles:` resolve relative to this manifest's own
+directory (the per-service subdir):
 
 ```yaml
 manifestVersion: 1
@@ -568,6 +584,9 @@ name: "@sntxrr/scaleway-<service>"
 version: "2026.07.17.1"   # use: swamp extension version --manifest <file> --json
 description: "<one sentence: what resource, which API, which methods>."
 repository: "https://github.com/sntxrr/swamp-scaleway"
+
+paths:
+  base: manifest
 
 models:
   - scaleway_<service>.ts
@@ -593,10 +612,11 @@ labels:
 
 ```bash
 DENO=~/.swamp/deno/deno   # or: swamp doctor extensions --json | jq -r .denoPath
+DIR=extensions/models/scaleway-<service>
 
 # 1. Type-check + test
-$DENO check extensions/models/scaleway_<service>.ts
-$DENO test  extensions/models/scaleway_<service>_test.ts
+$DENO check "$DIR/scaleway_<service>.ts"
+$DENO test  "$DIR/scaleway_<service>_test.ts"
 
 # 2. Confirm it registers
 swamp model type search scaleway --json
@@ -605,17 +625,17 @@ swamp model type search scaleway --json
 #    references/model/smoke_testing.md
 
 # 4. Format + quality (target >= 14/15)
-swamp extension fmt     manifests/scaleway-<service>.yaml --check
-swamp extension quality manifests/scaleway-<service>.yaml --json
+swamp extension fmt     "$DIR/manifest.yaml" --check
+swamp extension quality "$DIR/manifest.yaml" --json
 
 # 5. Adversarial Review Gate (REQUIRED before push)
 #    - run the Mandatory Mechanical Verification checks first
 #    - then dimensional review; write the content-hash-bound report to the
 #      path that --dry-run prints; set every verdict pass/na (note non-pass)
-swamp extension push manifests/scaleway-<service>.yaml --dry-run
+swamp extension push "$DIR/manifest.yaml" --dry-run
 
 # 6. Publish (via the swamp-extension-publish skill)
-swamp extension push manifests/scaleway-<service>.yaml --json
+swamp extension push "$DIR/manifest.yaml" --json
 ```
 
 Never `--yes` past the review gate. Editing source or bumping the version
