@@ -25,7 +25,11 @@ function makeContext(): {
   const ctx = {
     globalArgs: G,
     logger: { info: () => {}, warn: () => {} },
-    writeResource: (spec: string, name: string, data: Record<string, unknown>) => {
+    writeResource: (
+      spec: string,
+      name: string,
+      data: Record<string, unknown>,
+    ) => {
       writes.push({ spec, name, data });
       return Promise.resolve({ name });
     },
@@ -38,8 +42,11 @@ async function withMockedFetch<T>(
   fn: () => Promise<T>,
 ): Promise<T> {
   const original = globalThis.fetch;
-  globalThis.fetch = ((input: string | URL | Request, init?: RequestInit) =>
-    Promise.resolve(handler(String(input), init ?? {}))) as typeof globalThis.fetch;
+  globalThis.fetch =
+    ((input: string | URL | Request, init?: RequestInit) =>
+      Promise.resolve(
+        handler(String(input), init ?? {}),
+      )) as typeof globalThis.fetch;
   try {
     return await fn();
   } finally {
@@ -54,7 +61,9 @@ Deno.test("sync GETs the server and maps the resource with the auth header", asy
     (url, init) => {
       captured = { url, init };
       return new Response(
-        JSON.stringify({ server: { id: G.serverId, state: "running", name: "web-1" } }),
+        JSON.stringify({
+          server: { id: G.serverId, state: "running", name: "web-1" },
+        }),
         { status: 200 },
       );
     },
@@ -63,7 +72,10 @@ Deno.test("sync GETs the server and maps the resource with the auth header", asy
   const call = captured as unknown as { url: string; init: RequestInit };
   assertEquals(call.init.method, "GET");
   assertStringIncludes(call.url, "/instance/v1/zones/fr-par-1/servers/");
-  assertEquals((call.init.headers as Record<string, string>)["X-Auth-Token"], G.secretKey);
+  assertEquals(
+    (call.init.headers as Record<string, string>)["X-Auth-Token"],
+    G.secretKey,
+  );
   assertEquals(writes[0].spec, "server");
   assertEquals(writes[0].data.state, "running");
 });
@@ -74,7 +86,10 @@ Deno.test("action POSTs the verb then re-reads state", async () => {
   await withMockedFetch(
     (_u, init) => {
       methods.push(String(init.method ?? "GET"));
-      return new Response(JSON.stringify({ server: { id: G.serverId, state: "starting" } }), { status: 200 });
+      return new Response(
+        JSON.stringify({ server: { id: G.serverId, state: "starting" } }),
+        { status: 200 },
+      );
     },
     () => model.methods.action.execute({ action: "poweron" }, ctx),
   );
@@ -102,7 +117,8 @@ Deno.test("a non-2xx response throws and writes nothing", async () => {
   const { ctx, writes } = makeContext();
   let threw = false;
   await withMockedFetch(
-    () => new Response(JSON.stringify({ message: "not found" }), { status: 404 }),
+    () =>
+      new Response(JSON.stringify({ message: "not found" }), { status: 404 }),
     async () => {
       try {
         await model.methods.sync.execute({}, ctx);

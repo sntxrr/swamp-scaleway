@@ -43,10 +43,11 @@ async function withMockedFetch<T>(
   fn: () => Promise<T>,
 ): Promise<T> {
   const original = globalThis.fetch;
-  globalThis.fetch = ((input: string | URL | Request, init?: RequestInit) =>
-    Promise.resolve(
-      handler(String(input), init ?? {}),
-    )) as typeof globalThis.fetch;
+  globalThis.fetch =
+    ((input: string | URL | Request, init?: RequestInit) =>
+      Promise.resolve(
+        handler(String(input), init ?? {}),
+      )) as typeof globalThis.fetch;
   try {
     return await fn();
   } finally {
@@ -197,7 +198,8 @@ Deno.test("a non-2xx response throws and writes nothing", async () => {
   const { ctx, writes } = makeContext();
   let threw = false;
   await withMockedFetch(
-    () => new Response(JSON.stringify({ message: "not found" }), { status: 404 }),
+    () =>
+      new Response(JSON.stringify({ message: "not found" }), { status: 404 }),
     async () => {
       try {
         await model.methods.sync.execute({}, ctx);

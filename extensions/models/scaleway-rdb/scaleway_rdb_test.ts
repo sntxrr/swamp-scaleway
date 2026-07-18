@@ -25,7 +25,11 @@ function makeContext(): {
   const ctx = {
     globalArgs: G,
     logger: { info: () => {}, warn: () => {} },
-    writeResource: (spec: string, name: string, data: Record<string, unknown>) => {
+    writeResource: (
+      spec: string,
+      name: string,
+      data: Record<string, unknown>,
+    ) => {
       writes.push({ spec, name, data });
       return Promise.resolve({ name });
     },
@@ -38,8 +42,11 @@ async function withMockedFetch<T>(
   fn: () => Promise<T>,
 ): Promise<T> {
   const original = globalThis.fetch;
-  globalThis.fetch = ((input: string | URL | Request, init?: RequestInit) =>
-    Promise.resolve(handler(String(input), init ?? {}))) as typeof globalThis.fetch;
+  globalThis.fetch =
+    ((input: string | URL | Request, init?: RequestInit) =>
+      Promise.resolve(
+        handler(String(input), init ?? {}),
+      )) as typeof globalThis.fetch;
   try {
     return await fn();
   } finally {
@@ -152,7 +159,10 @@ Deno.test("no password or secret field is written into the snapshot", async () =
   );
   const snapshot = writes[0].data;
   const serialized = JSON.stringify(snapshot);
-  assertEquals(Object.prototype.hasOwnProperty.call(snapshot, "password"), false);
+  assertEquals(
+    Object.prototype.hasOwnProperty.call(snapshot, "password"),
+    false,
+  );
   assertEquals(serialized.includes("super-secret-pw"), false);
   assertEquals(serialized.includes("echoed-secret"), false);
 });
@@ -164,7 +174,12 @@ Deno.test("update PATCHes mutable fields and re-snapshots", async () => {
     (_u, init) => {
       methods.push(String(init.method ?? "GET"));
       return new Response(
-        JSON.stringify({ id: G.instanceId, name: "renamed", status: "ready", region: "fr-par" }),
+        JSON.stringify({
+          id: G.instanceId,
+          name: "renamed",
+          status: "ready",
+          region: "fr-par",
+        }),
         { status: 200 },
       );
     },
@@ -181,7 +196,11 @@ Deno.test("delete DELETEs the instance", async () => {
     (_u, init) => {
       methods.push(String(init.method ?? "GET"));
       return new Response(
-        JSON.stringify({ id: G.instanceId, status: "deleting", region: "fr-par" }),
+        JSON.stringify({
+          id: G.instanceId,
+          status: "deleting",
+          region: "fr-par",
+        }),
         { status: 200 },
       );
     },
@@ -210,7 +229,8 @@ Deno.test("a non-2xx response throws and writes nothing", async () => {
   const { ctx, writes } = makeContext();
   let threw = false;
   await withMockedFetch(
-    () => new Response(JSON.stringify({ message: "not found" }), { status: 404 }),
+    () =>
+      new Response(JSON.stringify({ message: "not found" }), { status: 404 }),
     async () => {
       try {
         await model.methods.sync.execute({}, ctx);

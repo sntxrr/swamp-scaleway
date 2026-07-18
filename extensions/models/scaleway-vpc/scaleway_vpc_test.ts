@@ -25,7 +25,11 @@ function makeContext(): {
   const ctx = {
     globalArgs: G,
     logger: { info: () => {}, warn: () => {} },
-    writeResource: (spec: string, name: string, data: Record<string, unknown>) => {
+    writeResource: (
+      spec: string,
+      name: string,
+      data: Record<string, unknown>,
+    ) => {
       writes.push({ spec, name, data });
       return Promise.resolve({ name });
     },
@@ -38,8 +42,11 @@ async function withMockedFetch<T>(
   fn: () => Promise<T>,
 ): Promise<T> {
   const original = globalThis.fetch;
-  globalThis.fetch = ((input: string | URL | Request, init?: RequestInit) =>
-    Promise.resolve(handler(String(input), init ?? {}))) as typeof globalThis.fetch;
+  globalThis.fetch =
+    ((input: string | URL | Request, init?: RequestInit) =>
+      Promise.resolve(
+        handler(String(input), init ?? {}),
+      )) as typeof globalThis.fetch;
   try {
     return await fn();
   } finally {
@@ -167,7 +174,13 @@ Deno.test("list-private-networks snapshots each private network", async () => {
       return new Response(
         JSON.stringify({
           private_networks: [
-            { id: "pn-1", name: "pn-one", region: "fr-par", tags: [], vpc_id: G.vpcId },
+            {
+              id: "pn-1",
+              name: "pn-one",
+              region: "fr-par",
+              tags: [],
+              vpc_id: G.vpcId,
+            },
           ],
           total_count: 1,
         }),
@@ -188,7 +201,8 @@ Deno.test("a non-2xx response throws and writes nothing", async () => {
   const { ctx, writes } = makeContext();
   let threw = false;
   await withMockedFetch(
-    () => new Response(JSON.stringify({ message: "not found" }), { status: 404 }),
+    () =>
+      new Response(JSON.stringify({ message: "not found" }), { status: 404 }),
     async () => {
       try {
         await model.methods.sync.execute({}, ctx);

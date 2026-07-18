@@ -101,22 +101,39 @@ async function scalewayFetch<T>(
   body?: unknown,
 ): Promise<T> {
   const base = (g.endpoint ?? "https://api.scaleway.com").replace(/\/+$/, "");
-  const res = await fetch(`${base}${path}`, {
-    method,
-    headers: {
-      "X-Auth-Token": g.secretKey,
-      "Content-Type": "application/json",
-      "Accept": "application/json",
-    },
-    body: body === undefined ? undefined : JSON.stringify(body),
-  });
-  const text = await res.text();
-  if (res.status < 200 || res.status >= 300) {
-    throw new Error(
-      `Scaleway ${method} ${path} failed (${res.status}): ${text}`,
-    );
+  const url = `${base}${path}`;
+  const maxAttempts = 3;
+  for (let attempt = 1;; attempt++) {
+    const res = await fetch(url, {
+      method,
+      headers: {
+        "X-Auth-Token": g.secretKey,
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+      },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
+    const text = await res.text();
+    if (res.status >= 200 && res.status < 300) {
+      return (text ? JSON.parse(text) : undefined) as T;
+    }
+    const transient = res.status === 429 || res.status === 503;
+    if (transient && attempt < maxAttempts) {
+      const retryAfter = Number(res.headers.get("retry-after"));
+      const delayMs = Number.isFinite(retryAfter) && retryAfter > 0
+        ? Math.min(retryAfter * 1000, 5000)
+        : attempt * 200;
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+      continue;
+    }
+    const err = new Error(
+      `Scaleway ${method} ${path} failed (${res.status}${
+        transient ? ", transient" : ""
+      }): ${text}`,
+    ) as Error & { status: number };
+    err.status = res.status;
+    throw err;
   }
-  return (text ? JSON.parse(text) : undefined) as T;
 }
 
 async function scalewayListAll<T>(
@@ -136,8 +153,15 @@ async function scalewayListAll<T>(
     );
     const batch = (res[key] as T[] | undefined) ?? [];
     items.push(...batch);
-    const total = Number(res.total_count ?? items.length);
-    if (batch.length === 0 || items.length >= total) break;
+    if (batch.length === 0) break;
+    const totalRaw = res.total_count;
+    if (totalRaw !== undefined && totalRaw !== null) {
+      // total_count is authoritative when present.
+      if (items.length >= Number(totalRaw)) break;
+    } else if (batch.length < pageSize) {
+      // No total_count: a short page is the last page.
+      break;
+    }
     page += 1;
   }
   return items;

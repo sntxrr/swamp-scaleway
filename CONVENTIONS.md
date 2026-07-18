@@ -3,7 +3,7 @@
 **Lead-owned. Builders read this, copy from it, and propose changes via the lead
 — never edit it directly.** This is the single source of truth for the shared
 technical contract in [`PRD.md`](./PRD.md) §5. If the PRD and this file ever
-disagree, this file wins for *implementation* detail; the PRD wins for *scope*.
+disagree, this file wins for _implementation_ detail; the PRD wins for _scope_.
 
 Everything here is derived from the working precedent
 `../oracle/extensions/models/oci_instance.ts` (single cloud resource wrapped
@@ -17,9 +17,9 @@ with an inline authed HTTP client, no SDK) — study it alongside this doc.
 2. Create your extension's **own directory**:
    `extensions/models/scaleway-<service>/` (see layout below). Copy the **golden
    template** (§7) to `scaleway_<service>.ts` inside it.
-3. Copy the **`scalewayFetch` / `scalewayListAll` helpers (§5) byte-identical** —
-   do not "improve" them per-service; a change is a lead-driven sweep across all
-   extensions.
+3. Copy the **`scalewayFetch` / `scalewayListAll` helpers (§5) byte-identical**
+   — do not "improve" them per-service; a change is a lead-driven sweep across
+   all extensions.
 4. Fill in schemas, URL paths (from §4 + the live Scaleway API docs), and
    methods (§3 taxonomy).
 5. Copy the **test template** (§8) to `scaleway_<service>_test.ts` in the same
@@ -70,20 +70,56 @@ landed `scaleway-instance/` dir is the reference to mirror.
 Implement only the methods the API actually supports; name them from this fixed
 vocabulary so every Scaleway extension feels identical:
 
-| Method | HTTP | Semantics |
-| --- | --- | --- |
-| `sync` | GET | Read current state of the one resource this model manages. **Always implement.** Idempotent. |
-| `create` | POST | Provision the resource; write a snapshot including the new ID. |
-| `update` | PATCH/PUT | Mutate mutable fields. |
-| `delete` | DELETE | Deprovision. Verify the ID first (`swamp model get --json`). |
-| `start`/`stop`/`reboot` | POST action | Compute-like lifecycle (mirror `oci_instance`). |
-| `list` | GET (paginated) | **Factory** discovery: one method fans out and writes many snapshots. Never loop `run` N times (per-model lock contention). Use `scalewayListAll`. |
+| Method                  | HTTP            | Semantics                                                                                                                                          |
+| ----------------------- | --------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `sync`                  | GET             | Read current state of the one resource this model manages. **Always implement.** Idempotent.                                                       |
+| `create`                | POST            | Provision the resource; write a snapshot including the new ID.                                                                                     |
+| `update`                | PATCH/PUT       | Mutate mutable fields.                                                                                                                             |
+| `delete`                | DELETE          | Deprovision. Verify the ID first (`swamp model get --json`).                                                                                       |
+| `start`/`stop`/`reboot` | POST action     | Compute-like lifecycle (mirror `oci_instance`).                                                                                                    |
+| `list`                  | GET (paginated) | **Factory** discovery: one method fans out and writes many snapshots. Never loop `run` N times (per-model lock contention). Use `scalewayListAll`. |
 
 - **One model instance per real resource**, keyed by the Scaleway resource ID
   (global arg `resourceId`, or a service-specific `serverId`/`vpcId`/…).
 - Async states: Scaleway creates return transient states (`starting`,
   `creating`). `sync` reports `status`; callers poll `sync`. Models never block
   on a spin-loop.
+
+### Robustness conventions (apply to every extension)
+
+1. **Instance-name = the resource's real ID, everywhere.** Single-resource
+   methods (`sync`/`update`/`delete`/`action`) write their snapshot under the
+   configured id (`writeResource(spec, g.<resourceId>, …)`), and `list`/`create`
+   write under each resource's own returned id. Never key a managed resource as
+   the literal `"latest"` — that stores the same resource under two names and
+   breaks drift reconciliation between `create`/`sync`/`list`.
+2. **Idempotent `delete`.** `scalewayFetch` throws an `Error & { status }`.
+   `delete` must treat a `404` as success (already gone):
+   ```ts
+   try {
+     await scalewayFetch(g, "DELETE", path);
+   } catch (e) {
+     if ((e as { status?: number }).status !== 404) throw e;
+   }
+   // then write a snapshot marking the resource absent
+   ```
+   Likewise a `create` that can 409 "already exists" should treat it as success
+   where the API is naturally idempotent (e.g. S3 `BucketAlreadyOwnedByYou`).
+3. **Labeled pre-flight `checks`.** Add a top-level `checks` field with at least
+   one labeled (`["policy"]` / `["live"]`) check validating the target
+   (zone/region membership, required id present). Checks auto-run before methods
+   **named** `create`/`update`/`delete`/`action` — so name any mutating method
+   with one of those verbs (e.g. DNS record-apply is `update`, bucket create is
+   `create`) or its pre-flight won't fire. Checks get `globalArgs` but **no**
+   `writeResource`.
+4. **Published-surface hygiene.** In READMEs and test fixtures use RFC 5737 IPs
+   (`192.0.2.x` / `198.51.100.x` / `203.0.113.x`) and `example.com` — never real
+   or routable addresses (incl. Scaleway's own `51.15.0.0/16`, `1.1.1.1`,
+   `9.9.9.9`). The `.md`/`.txt` analyzer misses IPs in `.ts` fixtures — you must
+   catch those.
+5. **Transient errors.** The canonical `scalewayFetch` already retries
+   `429`/`503` (bounded, honoring `Retry-After`) and tags the thrown error
+   `transient`. Do not add ad-hoc retry loops on top.
 
 ---
 
@@ -94,16 +130,17 @@ vocabulary so every Scaleway extension feels identical:
 
 **URL shapes** off the base:
 
-| Shape | Template | Region/zone global arg |
-| --- | --- | --- |
-| Zoned | `/{product}/{version}/zones/{zone}/{object}` | `zone` (default `fr-par-1`) |
+| Shape    | Template                                         | Region/zone global arg      |
+| -------- | ------------------------------------------------ | --------------------------- |
+| Zoned    | `/{product}/{version}/zones/{zone}/{object}`     | `zone` (default `fr-par-1`) |
 | Regional | `/{product}/{version}/regions/{region}/{object}` | `region` (default `fr-par`) |
-| Global | `/{product}/{version}/{object}` | none |
+| Global   | `/{product}/{version}/{object}`                  | none                        |
 
 - Zones: `fr-par-1..3`, `nl-ams-1..3`, `pl-waw-1..3`. Regions: `fr-par`,
   `nl-ams`, `pl-waw`.
 - **Pagination:** Scaleway list endpoints accept `?page=N&page_size=M` and
-  return `{ "<key>": [...], "total_count": N }`. Aggregate with `scalewayListAll`.
+  return `{ "<key>": [...], "total_count": N }`. Aggregate with
+  `scalewayListAll`.
 
 **S3-compatible services (`scaleway-object-storage`, `scaleway-file-storage`):**
 these use the **S3 API + AWS SigV4** (access key + secret key), endpoint
@@ -126,25 +163,41 @@ async function scalewayFetch<T>(
   body?: unknown,
 ): Promise<T> {
   const base = (g.endpoint ?? "https://api.scaleway.com").replace(/\/+$/, "");
-  const res = await fetch(`${base}${path}`, {
-    method,
-    headers: {
-      "X-Auth-Token": g.secretKey,
-      "Content-Type": "application/json",
-      "Accept": "application/json",
-    },
-    body: body === undefined ? undefined : JSON.stringify(body),
-  });
-  const text = await res.text();
-  if (res.status < 200 || res.status >= 300) {
-    throw new Error(
-      `Scaleway ${method} ${path} failed (${res.status}): ${text}`,
-    );
+  const url = `${base}${path}`;
+  const maxAttempts = 3;
+  for (let attempt = 1;; attempt++) {
+    const res = await fetch(url, {
+      method,
+      headers: {
+        "X-Auth-Token": g.secretKey,
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+      },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
+    const text = await res.text();
+    if (res.status >= 200 && res.status < 300) {
+      return (text ? JSON.parse(text) : undefined) as T;
+    }
+    const transient = res.status === 429 || res.status === 503;
+    if (transient && attempt < maxAttempts) {
+      const retryAfter = Number(res.headers.get("retry-after"));
+      const delayMs = Number.isFinite(retryAfter) && retryAfter > 0
+        ? Math.min(retryAfter * 1000, 5000)
+        : attempt * 200;
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+      continue;
+    }
+    const err = new Error(
+      `Scaleway ${method} ${path} failed (${res.status}${
+        transient ? ", transient" : ""
+      }): ${text}`,
+    ) as Error & { status: number };
+    err.status = res.status;
+    throw err;
   }
-  return (text ? JSON.parse(text) : undefined) as T;
 }
 
-/** Aggregate every page of a Scaleway list endpoint into one array. */
 async function scalewayListAll<T>(
   g: { secretKey: string; endpoint?: string },
   path: string,
@@ -162,8 +215,15 @@ async function scalewayListAll<T>(
     );
     const batch = (res[key] as T[] | undefined) ?? [];
     items.push(...batch);
-    const total = Number(res.total_count ?? items.length);
-    if (batch.length === 0 || items.length >= total) break;
+    if (batch.length === 0) break;
+    const totalRaw = res.total_count;
+    if (totalRaw !== undefined && totalRaw !== null) {
+      // total_count is authoritative when present.
+      if (items.length >= Number(totalRaw)) break;
+    } else if (batch.length < pageSize) {
+      // No total_count: a short page is the last page.
+      break;
+    }
     page += 1;
   }
   return items;
@@ -227,7 +287,9 @@ const GlobalArgsSchema = z.object({
   zone: z.string().default("fr-par-1").describe(
     "Availability zone, e.g. fr-par-1, nl-ams-1, pl-waw-1.",
   ),
-  serverId: z.string().describe("ID of the Instance server this model manages."),
+  serverId: z.string().describe(
+    "ID of the Instance server this model manages.",
+  ),
   endpoint: z.string().optional().describe(
     "Override the API host. Defaults to https://api.scaleway.com.",
   ),
@@ -235,7 +297,13 @@ const GlobalArgsSchema = z.object({
 type GlobalArgs = z.infer<typeof GlobalArgsSchema>;
 
 const ActionArgsSchema = z.object({
-  action: z.enum(["poweron", "poweroff", "reboot", "stop_in_place", "terminate"])
+  action: z.enum([
+    "poweron",
+    "poweroff",
+    "reboot",
+    "stop_in_place",
+    "terminate",
+  ])
     .describe("Instance server action verb."),
 });
 
@@ -257,20 +325,39 @@ async function scalewayFetch<T>(
   body?: unknown,
 ): Promise<T> {
   const base = (g.endpoint ?? "https://api.scaleway.com").replace(/\/+$/, "");
-  const res = await fetch(`${base}${path}`, {
-    method,
-    headers: {
-      "X-Auth-Token": g.secretKey,
-      "Content-Type": "application/json",
-      "Accept": "application/json",
-    },
-    body: body === undefined ? undefined : JSON.stringify(body),
-  });
-  const text = await res.text();
-  if (res.status < 200 || res.status >= 300) {
-    throw new Error(`Scaleway ${method} ${path} failed (${res.status}): ${text}`);
+  const url = `${base}${path}`;
+  const maxAttempts = 3;
+  for (let attempt = 1;; attempt++) {
+    const res = await fetch(url, {
+      method,
+      headers: {
+        "X-Auth-Token": g.secretKey,
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+      },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
+    const text = await res.text();
+    if (res.status >= 200 && res.status < 300) {
+      return (text ? JSON.parse(text) : undefined) as T;
+    }
+    const transient = res.status === 429 || res.status === 503;
+    if (transient && attempt < maxAttempts) {
+      const retryAfter = Number(res.headers.get("retry-after"));
+      const delayMs = Number.isFinite(retryAfter) && retryAfter > 0
+        ? Math.min(retryAfter * 1000, 5000)
+        : attempt * 200;
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+      continue;
+    }
+    const err = new Error(
+      `Scaleway ${method} ${path} failed (${res.status}${
+        transient ? ", transient" : ""
+      }): ${text}`,
+    ) as Error & { status: number };
+    err.status = res.status;
+    throw err;
   }
-  return (text ? JSON.parse(text) : undefined) as T;
 }
 
 async function scalewayListAll<T>(
@@ -290,8 +377,15 @@ async function scalewayListAll<T>(
     );
     const batch = (res[key] as T[] | undefined) ?? [];
     items.push(...batch);
-    const total = Number(res.total_count ?? items.length);
-    if (batch.length === 0 || items.length >= total) break;
+    if (batch.length === 0) break;
+    const totalRaw = res.total_count;
+    if (totalRaw !== undefined && totalRaw !== null) {
+      // total_count is authoritative when present.
+      if (items.length >= Number(totalRaw)) break;
+    } else if (batch.length < pageSize) {
+      // No total_count: a short page is the last page.
+      break;
+    }
     page += 1;
   }
   return items;
@@ -477,7 +571,11 @@ function makeContext(): {
   const ctx = {
     globalArgs: G,
     logger: { info: () => {}, warn: () => {} },
-    writeResource: (spec: string, name: string, data: Record<string, unknown>) => {
+    writeResource: (
+      spec: string,
+      name: string,
+      data: Record<string, unknown>,
+    ) => {
       writes.push({ spec, name, data });
       return Promise.resolve({ name });
     },
@@ -490,8 +588,11 @@ async function withMockedFetch<T>(
   fn: () => Promise<T>,
 ): Promise<T> {
   const original = globalThis.fetch;
-  globalThis.fetch = ((input: string | URL | Request, init?: RequestInit) =>
-    Promise.resolve(handler(String(input), init ?? {}))) as typeof globalThis.fetch;
+  globalThis.fetch =
+    ((input: string | URL | Request, init?: RequestInit) =>
+      Promise.resolve(
+        handler(String(input), init ?? {}),
+      )) as typeof globalThis.fetch;
   try {
     return await fn();
   } finally {
@@ -506,7 +607,9 @@ Deno.test("sync GETs the server and maps the resource with the auth header", asy
     (url, init) => {
       captured = { url, init };
       return new Response(
-        JSON.stringify({ server: { id: G.serverId, state: "running", name: "web-1" } }),
+        JSON.stringify({
+          server: { id: G.serverId, state: "running", name: "web-1" },
+        }),
         { status: 200 },
       );
     },
@@ -515,7 +618,10 @@ Deno.test("sync GETs the server and maps the resource with the auth header", asy
   const call = captured as unknown as { url: string; init: RequestInit };
   assertEquals(call.init.method, "GET");
   assertStringIncludes(call.url, "/instance/v1/zones/fr-par-1/servers/");
-  assertEquals((call.init.headers as Record<string, string>)["X-Auth-Token"], G.secretKey);
+  assertEquals(
+    (call.init.headers as Record<string, string>)["X-Auth-Token"],
+    G.secretKey,
+  );
   assertEquals(writes[0].spec, "server");
   assertEquals(writes[0].data.state, "running");
 });
@@ -526,7 +632,10 @@ Deno.test("action POSTs the verb then re-reads state", async () => {
   await withMockedFetch(
     (_u, init) => {
       methods.push(String(init.method ?? "GET"));
-      return new Response(JSON.stringify({ server: { id: G.serverId, state: "starting" } }), { status: 200 });
+      return new Response(
+        JSON.stringify({ server: { id: G.serverId, state: "starting" } }),
+        { status: 200 },
+      );
     },
     () => model.methods.action.execute({ action: "poweron" }, ctx),
   );
@@ -554,7 +663,8 @@ Deno.test("a non-2xx response throws and writes nothing", async () => {
   const { ctx, writes } = makeContext();
   let threw = false;
   await withMockedFetch(
-    () => new Response(JSON.stringify({ message: "not found" }), { status: 404 }),
+    () =>
+      new Response(JSON.stringify({ message: "not found" }), { status: 404 }),
     async () => {
       try {
         await model.methods.sync.execute({}, ctx);
@@ -573,15 +683,15 @@ Deno.test("a non-2xx response throws and writes nothing", async () => {
 
 ## 9. Manifest / README / LICENSE templates
 
-**`extensions/models/scaleway-<service>/manifest.yaml`** — `paths.base: manifest`
-makes `models:` and `additionalFiles:` resolve relative to this manifest's own
-directory (the per-service subdir):
+**`extensions/models/scaleway-<service>/manifest.yaml`** —
+`paths.base: manifest` makes `models:` and `additionalFiles:` resolve relative
+to this manifest's own directory (the per-service subdir):
 
 ```yaml
 manifestVersion: 1
 
 name: "@sntxrr/scaleway-<service>"
-version: "2026.07.17.1"   # use: swamp extension version --manifest <file> --json
+version: "2026.07.17.1" # use: swamp extension version --manifest <file> --json
 description: "<one sentence: what resource, which API, which methods>."
 repository: "https://github.com/sntxrr/swamp-scaleway"
 
@@ -597,14 +707,15 @@ additionalFiles:
 
 labels:
   - scaleway
-  - <product-family>   # compute | storage | network | database | serverless | security | ...
+  - <product-family> # compute | storage | network | database | serverless | security | ...
   - <keywords>
 ```
 
 - **README.md** (per extension, in `additionalFiles`): purpose, method table,
   the `swamp vault` + `swamp model create` quick-start (mirror
   `../oracle/README.md`), development commands, license line.
-- **LICENSE.md**: MIT, matching the sibling repos. Copy `../oracle/extensions/models/LICENSE.md`.
+- **LICENSE.md**: MIT, matching the sibling repos. Copy
+  `../oracle/extensions/models/LICENSE.md`.
 
 ---
 
@@ -649,15 +760,15 @@ Lead-verified base paths/scopes for the gating wave. Builders still read each
 service's live reference for exact request/response fields, but these
 prefixes/scopes are confirmed — build against them:
 
-| Service | Verified prefix | Scope | Notes |
-| --- | --- | --- | --- |
-| `scaleway-instance` | `/instance/v1` | zoned | `/instance/v1/zones/{zone}/servers`; action via POST `.../servers/{id}/action`. Golden template §7 matches. |
-| `scaleway-block-storage` | `/block/v1` | zoned | **Graduated from `v1alpha1` → `v1`** (PRD corrected). `/block/v1/zones/{zone}/volumes`. |
-| `scaleway-object-storage` | `s3.<region>.scw.cloud` | regional | S3 API + SigV4 (Appendix A) — **not** `X-Auth-Token`. |
-| `scaleway-vpc` | `/vpc/v2` | regional | `/vpc/v2/regions/{region}/vpcs` and `/private-networks`. |
-| `scaleway-load-balancer` | `/lb/v1` | **zoned** | `/lb/v1/zones/{zone}/lbs`. The **regional** LB API is deprecated — use zoned. |
-| `scaleway-rdb` | `/rdb/v1` | regional | `/rdb/v1/regions/{region}/instances`. |
-| `scaleway-dns` | `/domain/v2beta1` | **global** (PRD corrected) | `/domain/v2beta1/dns-zones/{zone}/records`; no region/zone in path. |
+| Service                   | Verified prefix         | Scope                      | Notes                                                                                                       |
+| ------------------------- | ----------------------- | -------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| `scaleway-instance`       | `/instance/v1`          | zoned                      | `/instance/v1/zones/{zone}/servers`; action via POST `.../servers/{id}/action`. Golden template §7 matches. |
+| `scaleway-block-storage`  | `/block/v1`             | zoned                      | **Graduated from `v1alpha1` → `v1`** (PRD corrected). `/block/v1/zones/{zone}/volumes`.                     |
+| `scaleway-object-storage` | `s3.<region>.scw.cloud` | regional                   | S3 API + SigV4 (Appendix A) — **not** `X-Auth-Token`.                                                       |
+| `scaleway-vpc`            | `/vpc/v2`               | regional                   | `/vpc/v2/regions/{region}/vpcs` and `/private-networks`.                                                    |
+| `scaleway-load-balancer`  | `/lb/v1`                | **zoned**                  | `/lb/v1/zones/{zone}/lbs`. The **regional** LB API is deprecated — use zoned.                               |
+| `scaleway-rdb`            | `/rdb/v1`               | regional                   | `/rdb/v1/regions/{region}/instances`.                                                                       |
+| `scaleway-dns`            | `/domain/v2beta1`       | **global** (PRD corrected) | `/domain/v2beta1/dns-zones/{zone}/records`; no region/zone in path.                                         |
 
 Sources: scaleway.com/en/developers/api/{block,domains-and-dns,load-balancer}.
 Wave 2/3 prefixes in the PRD are provisional — each builder confirms its own
@@ -675,8 +786,8 @@ Web Crypto HMAC-SHA256, the same way `oci_instance` implements RSA-SHA256 inline
 `Authorization: AWS4-HMAC-SHA256 ...`). The lead lands the reviewed signer
 snippet here before those two rows start; both copy it byte-identical.
 
-Global args for S3 rows: `accessKey`, `secretKey` (sensitive), `region`
-(default `fr-par`), `endpoint?`.
+Global args for S3 rows: `accessKey`, `secretKey` (sensitive), `region` (default
+`fr-par`), `endpoint?`.
 
 ---
 
@@ -689,4 +800,6 @@ Scaleway Secret Manager. The vault's `createProvider(name, config)` returns
 `{ get, put, list, getName }` backed by `scalewayFetch` against
 `/secret-manager/v1beta1/regions/{region}/secrets`. See the swamp extension
 guide's Vault quick-start.
+
+```
 ```

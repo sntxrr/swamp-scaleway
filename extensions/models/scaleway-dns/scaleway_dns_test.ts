@@ -42,10 +42,11 @@ async function withMockedFetch<T>(
   fn: () => Promise<T>,
 ): Promise<T> {
   const original = globalThis.fetch;
-  globalThis.fetch = ((input: string | URL | Request, init?: RequestInit) =>
-    Promise.resolve(
-      handler(String(input), init ?? {}),
-    )) as typeof globalThis.fetch;
+  globalThis.fetch =
+    ((input: string | URL | Request, init?: RequestInit) =>
+      Promise.resolve(
+        handler(String(input), init ?? {}),
+      )) as typeof globalThis.fetch;
   try {
     return await fn();
   } finally {
@@ -96,8 +97,14 @@ Deno.test("list-records aggregates record pages until total_count is reached", a
     (url) => {
       const page = new URL(url).searchParams.get("page");
       const body = page === "1"
-        ? { records: [{ id: "a", name: "@", type: "A", data: "1.1.1.1" }], total_count: 2 }
-        : { records: [{ id: "b", name: "www", type: "CNAME", data: "@" }], total_count: 2 };
+        ? {
+          records: [{ id: "a", name: "@", type: "A", data: "1.1.1.1" }],
+          total_count: 2,
+        }
+        : {
+          records: [{ id: "b", name: "www", type: "CNAME", data: "@" }],
+          total_count: 2,
+        };
       return new Response(JSON.stringify(body), { status: 200 });
     },
     () => model.methods["list-records"].execute({}, ctx),
@@ -160,7 +167,11 @@ Deno.test("set-records PATCHes the changes body and snapshots returned records",
       model.methods["set-records"].execute(
         {
           changes: [
-            { add: { records: [{ name: "api", type: "A", data: "9.9.9.9", ttl: 60 }] } },
+            {
+              add: {
+                records: [{ name: "api", type: "A", data: "9.9.9.9", ttl: 60 }],
+              },
+            },
           ],
           returnAllRecords: true,
         },
@@ -169,7 +180,10 @@ Deno.test("set-records PATCHes the changes body and snapshots returned records",
   );
   const call = captured as unknown as { url: string; init: RequestInit };
   assertEquals(call.init.method, "PATCH");
-  assertStringIncludes(call.url, "/domain/v2beta1/dns-zones/example.com/records");
+  assertStringIncludes(
+    call.url,
+    "/domain/v2beta1/dns-zones/example.com/records",
+  );
   assert(!call.url.includes("/zones/"));
   assert(!call.url.includes("/regions/"));
   const sent = JSON.parse(String(call.init.body));
@@ -183,7 +197,8 @@ Deno.test("a non-2xx response throws and writes nothing", async () => {
   const { ctx, writes } = makeContext();
   let threw = false;
   await withMockedFetch(
-    () => new Response(JSON.stringify({ message: "not found" }), { status: 404 }),
+    () =>
+      new Response(JSON.stringify({ message: "not found" }), { status: 404 }),
     async () => {
       try {
         await model.methods.sync.execute({}, ctx);

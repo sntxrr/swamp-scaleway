@@ -42,10 +42,11 @@ async function withMockedFetch<T>(
   fn: () => Promise<T>,
 ): Promise<T> {
   const original = globalThis.fetch;
-  globalThis.fetch = ((input: string | URL | Request, init?: RequestInit) =>
-    Promise.resolve(
-      handler(String(input), init ?? {}),
-    )) as typeof globalThis.fetch;
+  globalThis.fetch =
+    ((input: string | URL | Request, init?: RequestInit) =>
+      Promise.resolve(
+        handler(String(input), init ?? {}),
+      )) as typeof globalThis.fetch;
   try {
     return await fn();
   } finally {
@@ -144,7 +145,10 @@ Deno.test("update PATCHes only the provided mutable fields", async () => {
   );
   const call = captured as unknown as { url: string; init: RequestInit };
   assertEquals(call.init.method, "PATCH");
-  assertStringIncludes(call.url, `/block/v1/zones/fr-par-1/volumes/${G.volumeId}`);
+  assertStringIncludes(
+    call.url,
+    `/block/v1/zones/fr-par-1/volumes/${G.volumeId}`,
+  );
   const body = JSON.parse(String(call.init.body));
   assertEquals(body.name, "renamed");
   assertEquals(body.size, 30000000000);
@@ -164,7 +168,10 @@ Deno.test("delete DELETEs the volume and records a deleting snapshot", async () 
   );
   const call = captured as unknown as { url: string; init: RequestInit };
   assertEquals(call.init.method, "DELETE");
-  assertStringIncludes(call.url, `/block/v1/zones/fr-par-1/volumes/${G.volumeId}`);
+  assertStringIncludes(
+    call.url,
+    `/block/v1/zones/fr-par-1/volumes/${G.volumeId}`,
+  );
   assertEquals(writes[0].data.status, "deleting");
 });
 
@@ -189,7 +196,8 @@ Deno.test("a non-2xx response throws and writes nothing", async () => {
   const { ctx, writes } = makeContext();
   let threw = false;
   await withMockedFetch(
-    () => new Response(JSON.stringify({ message: "not found" }), { status: 404 }),
+    () =>
+      new Response(JSON.stringify({ message: "not found" }), { status: 404 }),
     async () => {
       try {
         await model.methods.sync.execute({}, ctx);
