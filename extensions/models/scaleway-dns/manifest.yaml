@@ -1,0 +1,22 @@
+manifestVersion: 1
+
+name: "@sntxrr/scaleway-dns"
+version: "2026.07.17.1"
+description: "Manage a Scaleway DNS zone — sync records, list zones, and apply add/set/delete record changes, via the global Domains & DNS API (/domain/v2beta1) with X-Auth-Token auth."
+repository: "https://github.com/sntxrr/swamp-scaleway"
+
+paths:
+  base: manifest
+
+models:
+  - scaleway_dns.ts
+
+additionalFiles:
+  - README.md
+  - LICENSE.md
+
+labels:
+  - scaleway
+  - network
+  - dns
+  - domains

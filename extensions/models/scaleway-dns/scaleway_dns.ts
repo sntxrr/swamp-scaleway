@@ -1,0 +1,351 @@
+/**
+ * Scaleway Domains & DNS integration.
+ *
+ * Wraps the Scaleway Domains and DNS API (`/domain/v2beta1`, **global** — no
+ * zone/region segment in the path) so a swamp model represents a single managed
+ * DNS zone, keyed by its domain name (`dnsZone`). Exposes `sync` /
+ * `list-records` (snapshot every record in the zone), a factory `list-zones`
+ * (snapshot every DNS zone in the project), and `set-records` (apply a batch of
+ * add/set/delete/clear record changes via PATCH). Authenticated with the
+ * `X-Auth-Token` header (secret key wired from a vault).
+ *
+ * API reference: https://www.scaleway.com/en/developers/api/domains-and-dns/
+ * @module
+ */
+// extensions/models/scaleway-dns/scaleway_dns.ts
+import { z } from "npm:zod@4";
+
+// --- Schemas ---------------------------------------------------------------
+const GlobalArgsSchema = z.object({
+  secretKey: z.string().meta({ sensitive: true }).describe(
+    "Scaleway API secret key. Wire with ${{ vault.get(scaleway, SCW_SECRET_KEY) }}.",
+  ),
+  projectId: z.string().describe(
+    "Scaleway Project ID that owns the DNS zone.",
+  ),
+  dnsZone: z.string().describe(
+    "The DNS zone (domain name) this model manages, e.g. example.com.",
+  ),
+  endpoint: z.string().optional().describe(
+    "Override the API host. Defaults to https://api.scaleway.com.",
+  ),
+});
+type GlobalArgs = z.infer<typeof GlobalArgsSchema>;
+
+const SetRecordsArgsSchema = z.object({
+  changes: z.array(z.record(z.string(), z.unknown())).describe(
+    "Ordered list of record-change operations. Each entry holds exactly one of " +
+      "`add` ({ records }), `set` ({ id_fields, records }), `delete` " +
+      "({ id_fields }) or `clear` ({}). Passed through verbatim as the PATCH " +
+      "`changes` body.",
+  ),
+  returnAllRecords: z.boolean().optional().describe(
+    "When true, the API returns every record in the zone after applying the " +
+      "changes; those are snapshotted. Maps to `return_all_records`.",
+  ),
+});
+
+const RecordSchema = z.object({
+  id: z.string().nullable().optional().describe("Record ID (server-assigned)."),
+  name: z.string().describe("Record name relative to the zone (e.g. www, @)."),
+  type: z.string().describe("Record type, e.g. A, AAAA, CNAME, MX, TXT."),
+  ttl: z.number().nullable().optional().describe("Time-to-live in seconds."),
+  data: z.string().describe("Record value/target data."),
+  priority: z.number().nullable().optional().describe(
+    "Record priority (e.g. for MX/SRV records).",
+  ),
+  comment: z.string().nullable().optional().describe(
+    "Optional record comment.",
+  ),
+  dnsZone: z.string().describe("The DNS zone this record belongs to."),
+  observedAt: z.string().describe(
+    "ISO-8601 timestamp this snapshot was taken.",
+  ),
+});
+
+const ZoneSchema = z.object({
+  domain: z.string().describe("Root domain of the DNS zone."),
+  subdomain: z.string().nullable().optional().describe(
+    "Subdomain of the DNS zone (empty for the apex).",
+  ),
+  status: z.string().describe("Zone status, e.g. active, pending, error."),
+  message: z.string().nullable().optional().describe(
+    "Human-readable status message.",
+  ),
+  projectId: z.string().nullable().optional().describe(
+    "Project ID that owns the zone.",
+  ),
+  ns: z.array(z.string()).nullable().optional().describe(
+    "Configured name servers for the zone.",
+  ),
+  updatedAt: z.string().nullable().optional().describe(
+    "When the zone was last updated (ISO-8601).",
+  ),
+  observedAt: z.string().describe(
+    "ISO-8601 timestamp this snapshot was taken.",
+  ),
+});
+
+// --- Scaleway HTTP client (canonical — see CONVENTIONS.md §5) ---------------
+async function scalewayFetch<T>(
+  g: { secretKey: string; endpoint?: string },
+  method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE",
+  path: string,
+  body?: unknown,
+): Promise<T> {
+  const base = (g.endpoint ?? "https://api.scaleway.com").replace(/\/+$/, "");
+  const res = await fetch(`${base}${path}`, {
+    method,
+    headers: {
+      "X-Auth-Token": g.secretKey,
+      "Content-Type": "application/json",
+      "Accept": "application/json",
+    },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  const text = await res.text();
+  if (res.status < 200 || res.status >= 300) {
+    throw new Error(
+      `Scaleway ${method} ${path} failed (${res.status}): ${text}`,
+    );
+  }
+  return (text ? JSON.parse(text) : undefined) as T;
+}
+
+async function scalewayListAll<T>(
+  g: { secretKey: string; endpoint?: string },
+  path: string,
+  key: string,
+  pageSize = 100,
+): Promise<T[]> {
+  const items: T[] = [];
+  let page = 1;
+  for (;;) {
+    const sep = path.includes("?") ? "&" : "?";
+    const res = await scalewayFetch<Record<string, unknown>>(
+      g,
+      "GET",
+      `${path}${sep}page=${page}&page_size=${pageSize}`,
+    );
+    const batch = (res[key] as T[] | undefined) ?? [];
+    items.push(...batch);
+    const total = Number(res.total_count ?? items.length);
+    if (batch.length === 0 || items.length >= total) break;
+    page += 1;
+  }
+  return items;
+}
+
+// --- Context types (canonical — see CONVENTIONS.md §6) ----------------------
+type Logger = {
+  info: (message: string, props?: Record<string, unknown>) => void;
+  warn: (message: string, props?: Record<string, unknown>) => void;
+};
+type ExecuteContext = {
+  globalArgs: GlobalArgs;
+  logger: Logger;
+  writeResource: (
+    specName: string,
+    name: string,
+    data: Record<string, unknown>,
+  ) => Promise<{ name: string }>;
+};
+
+// --- Mapping ---------------------------------------------------------------
+/** Map a raw Scaleway DNS record (snake_case) to a camelCase resource snapshot. */
+function toRecordResource(
+  r: Record<string, unknown>,
+  g: GlobalArgs,
+  observedAt: string,
+): Record<string, unknown> {
+  return {
+    id: (r.id as string) ?? null,
+    name: (r.name as string) ?? "",
+    type: (r.type as string) ?? "unknown",
+    ttl: (r.ttl as number) ?? null,
+    data: (r.data as string) ?? "",
+    priority: (r.priority as number) ?? null,
+    comment: (r.comment as string) ?? null,
+    dnsZone: g.dnsZone,
+    observedAt,
+  };
+}
+
+/** Map a raw Scaleway DNS zone (snake_case) to a camelCase resource snapshot. */
+function toZoneResource(
+  z: Record<string, unknown>,
+  observedAt: string,
+): Record<string, unknown> {
+  return {
+    domain: (z.domain as string) ?? "",
+    subdomain: (z.subdomain as string) ?? null,
+    status: (z.status as string) ?? "unknown",
+    message: (z.message as string) ?? null,
+    projectId: (z.project_id as string) ?? null,
+    ns: (z.ns as string[]) ?? null,
+    updatedAt: (z.updated_at as string) ?? null,
+    observedAt,
+  };
+}
+
+/** Records collection path for a zone (global scope — no zone/region segment). */
+const recordsPath = (g: GlobalArgs): string =>
+  `/domain/v2beta1/dns-zones/${encodeURIComponent(g.dnsZone)}/records`;
+
+/** DNS zones collection path (global scope — no zone/region segment). */
+const zonesPath = (): string => `/domain/v2beta1/dns-zones`;
+
+// --- Shared method logic ---------------------------------------------------
+/** Fetch every record in the managed zone and write a snapshot per record. */
+async function syncRecords(
+  context: ExecuteContext,
+): Promise<{ dataHandles: Array<{ name: string }> }> {
+  const { globalArgs: g, logger } = context;
+  logger.info("Listing records for DNS zone {zone}", { zone: g.dnsZone });
+  const records = await scalewayListAll<Record<string, unknown>>(
+    g,
+    recordsPath(g),
+    "records",
+  );
+  logger.info("Found {n} records in {zone}", {
+    n: records.length,
+    zone: g.dnsZone,
+  });
+  const now = new Date().toISOString();
+  const handles: Array<{ name: string }> = [];
+  for (const r of records) {
+    handles.push(
+      await context.writeResource(
+        "record",
+        (r.id as string) ?? crypto.randomUUID(),
+        toRecordResource(r, g, now),
+      ),
+    );
+  }
+  return { dataHandles: handles };
+}
+
+// --- Model -----------------------------------------------------------------
+/** Scaleway Domains & DNS model — one instance per DNS zone, keyed by dnsZone. */
+export const model = {
+  type: "@sntxrr/scaleway-dns",
+  version: "2026.07.17.1",
+  globalArguments: GlobalArgsSchema,
+  resources: {
+    "record": {
+      description: "Snapshot of a single DNS record in the managed zone",
+      schema: RecordSchema,
+      lifetime: "infinite" as const,
+      garbageCollection: 20,
+    },
+    "zone": {
+      description: "Snapshot of a DNS zone discovered in the project",
+      schema: ZoneSchema,
+      lifetime: "infinite" as const,
+      garbageCollection: 20,
+    },
+  },
+  methods: {
+    sync: {
+      description:
+        "Fetch every DNS record in the managed zone (ListDNSZoneRecords).",
+      arguments: z.object({}),
+      execute: (
+        _args: Record<string, never>,
+        context: ExecuteContext,
+      ): Promise<{ dataHandles: Array<{ name: string }> }> =>
+        syncRecords(context),
+    },
+    "list-records": {
+      description:
+        "Snapshot every DNS record in the managed zone (alias of sync, factory).",
+      arguments: z.object({}),
+      execute: (
+        _args: Record<string, never>,
+        context: ExecuteContext,
+      ): Promise<{ dataHandles: Array<{ name: string }> }> =>
+        syncRecords(context),
+    },
+    "list-zones": {
+      description:
+        "Discover all DNS zones in the project (factory, paginated).",
+      arguments: z.object({}),
+      execute: async (
+        _args: Record<string, never>,
+        context: ExecuteContext,
+      ): Promise<{ dataHandles: Array<{ name: string }> }> => {
+        const { globalArgs: g, logger } = context;
+        const zones = await scalewayListAll<Record<string, unknown>>(
+          g,
+          `${zonesPath()}?project_id=${encodeURIComponent(g.projectId)}`,
+          "dns_zones",
+        );
+        logger.info("Discovered {n} DNS zones", { n: zones.length });
+        const now = new Date().toISOString();
+        const handles: Array<{ name: string }> = [];
+        for (const z of zones) {
+          const subdomain = (z.subdomain as string) ?? "";
+          const domain = (z.domain as string) ?? "";
+          const key = subdomain ? `${subdomain}.${domain}` : domain;
+          handles.push(
+            await context.writeResource(
+              "zone",
+              key || crypto.randomUUID(),
+              toZoneResource(z, now),
+            ),
+          );
+        }
+        return { dataHandles: handles };
+      },
+    },
+    "set-records": {
+      description:
+        "Apply a batch of record changes (add/set/delete/clear) to the zone (PATCH).",
+      arguments: SetRecordsArgsSchema,
+      execute: async (
+        args: z.infer<typeof SetRecordsArgsSchema>,
+        context: ExecuteContext,
+      ): Promise<{ dataHandles: Array<{ name: string }> }> => {
+        const { globalArgs: g, logger } = context;
+        logger.info("Applying {n} record changes to {zone}", {
+          n: args.changes.length,
+          zone: g.dnsZone,
+        });
+        const res = await scalewayFetch<
+          { records?: Record<string, unknown>[] }
+        >(
+          g,
+          "PATCH",
+          recordsPath(g),
+          {
+            changes: args.changes,
+            return_all_records: args.returnAllRecords ?? true,
+          },
+        );
+        const now = new Date().toISOString();
+        const handles: Array<{ name: string }> = [];
+        for (const r of res.records ?? []) {
+          handles.push(
+            await context.writeResource(
+              "record",
+              (r.id as string) ?? crypto.randomUUID(),
+              toRecordResource(r, g, now),
+            ),
+          );
+        }
+        return { dataHandles: handles };
+      },
+    },
+  },
+};
+
+/** Internal helpers exported only for unit testing. */
+export const _internal = {
+  scalewayFetch,
+  scalewayListAll,
+  toRecordResource,
+  toZoneResource,
+  recordsPath,
+  zonesPath,
+  syncRecords,
+};

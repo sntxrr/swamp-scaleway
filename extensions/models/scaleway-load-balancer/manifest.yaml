@@ -1,0 +1,21 @@
+manifestVersion: 1
+
+name: "@sntxrr/scaleway-load-balancer"
+version: "2026.07.17.1"
+description: "Manage a Scaleway Load Balancer — sync current state, create, delete, and discover Load Balancers plus their backends and frontends in a zone, via the zoned Load Balancer API with X-Auth-Token auth."
+repository: "https://github.com/sntxrr/swamp-scaleway"
+
+paths:
+  base: manifest
+
+models:
+  - scaleway_load_balancer.ts
+
+additionalFiles:
+  - README.md
+  - LICENSE.md
+
+labels:
+  - scaleway
+  - network
+  - load-balancer

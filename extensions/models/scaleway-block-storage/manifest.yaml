@@ -1,0 +1,22 @@
+manifestVersion: 1
+
+name: "@sntxrr/scaleway-block-storage"
+version: "2026.07.17.1"
+description: "Manage a Scaleway Block Storage volume — sync current state, create, update (resize/rename/re-tag), delete, and discover volumes in a zone, via the Block Storage API with X-Auth-Token auth."
+repository: "https://github.com/sntxrr/swamp-scaleway"
+
+paths:
+  base: manifest
+
+models:
+  - scaleway_block_storage.ts
+
+additionalFiles:
+  - README.md
+  - LICENSE.md
+
+labels:
+  - scaleway
+  - storage
+  - block-storage
+  - volume
