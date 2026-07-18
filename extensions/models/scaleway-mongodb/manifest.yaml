@@ -1,0 +1,21 @@
+manifestVersion: 1
+
+name: "@sntxrr/scaleway-mongodb"
+version: "2026.07.17.1"
+description: "Manage a Scaleway Managed MongoDB® Database Instance — sync state, create, update, and delete instances, and discover instances in a region, via the Managed MongoDB API with X-Auth-Token auth."
+repository: "https://github.com/sntxrr/swamp-scaleway"
+
+paths:
+  base: manifest
+
+models:
+  - scaleway_mongodb.ts
+
+additionalFiles:
+  - README.md
+  - LICENSE.md
+
+labels:
+  - scaleway
+  - database
+  - mongodb

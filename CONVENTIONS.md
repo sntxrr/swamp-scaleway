@@ -775,6 +775,26 @@ Wave 2/3 prefixes in the PRD are provisional — each builder confirms its own
 service's version/scope against the live reference at pickup and reports any
 correction back to the lead for this table.
 
+## Wave 2 / Wave 3 API reconciliation (verified during build)
+
+Corrections surfaced by builders against live Scaleway OpenAPI schemas — fold
+these into the catalog when reasoning about these services:
+
+| Service | Correction |
+| --- | --- |
+| `scaleway-file-storage` | **Native token API**, not S3/SigV4 — `/file/v1alpha1`, regional, `X-Auth-Token`. (Appendix A's file-storage mention is superseded.) |
+| `scaleway-mongodb` | Graduated to **`/mongodb/v1`** (not `v1alpha1`). Uses `version`/`node_amount`; volume create sub-fields ambiguous — confirm at smoke test. |
+| `scaleway-serverless-jobs` | **`/serverless-jobs/v1alpha2`** (not `v1alpha1`); run action is `POST .../{id}/start` (returns `{ job_runs: [...] }`), method kept named to fire pre-flight. |
+| `scaleway-serverless-containers` | Deploy action is `/redeploy` (no `/deploy`). |
+| `scaleway-tem` | Delete is `POST .../domains/{id}/delete` (kept method-named `delete` so its pre-flight fires). |
+| `scaleway-public-gateway` | `/vpc-gw/v2`, zoned; serves **`it-mil-1` (Milan)** but **not `fr-par-3`** — its `valid-zone` check uses a service-accurate zone set. |
+| Pagination | Every Scaleway list endpoint checked uses `page`/`page_size` (the canonical helper). Prose mentioning `per_page` (e.g. Inference) is boilerplate; the OpenAPI schemas confirm `page_size`. |
+| Zones | The generic §4 zone list omits **`it-mil-1` (Milan)**; per-service checks may legitimately include it or restrict to a subset (e.g. webhosting/tem/file-storage are `fr-par`-only today). |
+
+Reports (`scaleway-inventory`) live in `extensions/reports/` (not a model subdir),
+have no HTTP client / `checks` / `writeResource`, and aggregate stored model data
+via the report `dataRepository` interface.
+
 ## Appendix A — S3 / SigV4 (object & file storage)
 
 `scaleway-object-storage` and `scaleway-file-storage` do **not** use

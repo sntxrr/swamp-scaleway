@@ -1,0 +1,22 @@
+manifestVersion: 1
+
+name: "@sntxrr/scaleway-account"
+version: "2026.07.17.1"
+description: "Manage a Scaleway Account Project — sync, create, update, delete, and list Projects, via the global Account API (/account/v3) with X-Auth-Token auth."
+repository: "https://github.com/sntxrr/swamp-scaleway"
+
+paths:
+  base: manifest
+
+models:
+  - scaleway_account.ts
+
+additionalFiles:
+  - README.md
+  - LICENSE.md
+
+labels:
+  - scaleway
+  - account
+  - project
+  - organization

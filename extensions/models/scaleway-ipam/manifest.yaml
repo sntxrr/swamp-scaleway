@@ -1,0 +1,22 @@
+manifestVersion: 1
+
+name: "@sntxrr/scaleway-ipam"
+version: "2026.07.17.1"
+description: "Manage a Scaleway IPAM IP address — sync state, book (reserve), update tags/reverses, and release an IP, and discover managed IPs in a region, via the IPAM API with X-Auth-Token auth."
+repository: "https://github.com/sntxrr/swamp-scaleway"
+
+paths:
+  base: manifest
+
+models:
+  - scaleway_ipam.ts
+
+additionalFiles:
+  - README.md
+  - LICENSE.md
+
+labels:
+  - scaleway
+  - network
+  - ipam
+  - ip

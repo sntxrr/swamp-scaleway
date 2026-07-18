@@ -1,0 +1,22 @@
+manifestVersion: 1
+
+name: "@sntxrr/scaleway-tem"
+version: "2026.07.17.1"
+description: "Manage a Scaleway Transactional Email (TEM) sending domain — sync state, create, and delete domains, discover domains, and list sent emails in a region, via the TEM API with X-Auth-Token auth."
+repository: "https://github.com/sntxrr/swamp-scaleway"
+
+paths:
+  base: manifest
+
+models:
+  - scaleway_tem.ts
+
+additionalFiles:
+  - README.md
+  - LICENSE.md
+
+labels:
+  - scaleway
+  - email
+  - transactional-email
+  - tem

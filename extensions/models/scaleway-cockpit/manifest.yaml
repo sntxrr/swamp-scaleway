@@ -1,0 +1,22 @@
+manifestVersion: 1
+
+name: "@sntxrr/scaleway-cockpit"
+version: "2026.07.17.1"
+description: "Manage a Scaleway Cockpit (Observability) data source — sync state, create metrics/logs/traces data sources, delete, and discover data sources and tokens in a region, via the Cockpit API with X-Auth-Token auth."
+repository: "https://github.com/sntxrr/swamp-scaleway"
+
+paths:
+  base: manifest
+
+models:
+  - scaleway_cockpit.ts
+
+additionalFiles:
+  - README.md
+  - LICENSE.md
+
+labels:
+  - scaleway
+  - observability
+  - cockpit
+  - monitoring

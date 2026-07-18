@@ -1,0 +1,22 @@
+manifestVersion: 1
+
+name: "@sntxrr/scaleway-elastic-metal"
+version: "2026.07.17.1"
+description: "Manage a Scaleway Elastic Metal (Bare Metal) server — sync current state, create, delete, issue lifecycle actions (start/stop/reboot), and discover servers in a zone, via the Elastic Metal API with X-Auth-Token auth."
+repository: "https://github.com/sntxrr/swamp-scaleway"
+
+paths:
+  base: manifest
+
+models:
+  - scaleway_elastic_metal.ts
+
+additionalFiles:
+  - README.md
+  - LICENSE.md
+
+labels:
+  - scaleway
+  - compute
+  - bare-metal
+  - elastic-metal

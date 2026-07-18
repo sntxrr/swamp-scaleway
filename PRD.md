@@ -307,15 +307,15 @@ Package = `@sntxrr/scaleway-<service>`. "Auth": **T** = `X-Auth-Token`,
 | `scaleway-elastic-metal` | Bare metal `/baremetal/v1` | T | Z | M |
 | `scaleway-apple-silicon` | Apple silicon `/apple-silicon/v1alpha1` | T | Z | S |
 | `scaleway-redis` | Managed Redis `/redis/v1` | T | Z | M |
-| `scaleway-mongodb` | Managed MongoDB `/mongodb/v1alpha1` | T | R | M |
-| `scaleway-serverless-jobs` | Serverless Jobs `/serverless-jobs/v1alpha1` | T | R | M |
+| `scaleway-mongodb` | Managed MongoDB `/mongodb/v1` | T | R | M |
+| `scaleway-serverless-jobs` | Serverless Jobs `/serverless-jobs/v1alpha2` | T | R | M |
 | `scaleway-public-gateway` | Public Gateway `/vpc-gw/v2` | T | Z | M |
 | `scaleway-ipam` | IPAM `/ipam/v1` | T | R | S |
 | `scaleway-inference` | Managed Inference `/inference/v1` | T | R | M |
 | `scaleway-cockpit` | Observability / Cockpit `/cockpit/v1` | T | R | M |
 | `scaleway-messaging` | Messaging & Queuing (NATS/SQS/SNS) `/mnq/v1beta1` | T | R | M |
 | `scaleway-tem` | Transactional Email `/transactional-email/v1alpha1` | T | R | M |
-| `scaleway-file-storage` | File Storage (S3/NFS) | **S3** | R | L |
+| `scaleway-file-storage` | File Storage (managed NFS) `/file/v1alpha1` | T | R | M |
 | `scaleway-webhosting` | Web Hosting `/webhosting/v1` | T | R | S |
 | `scaleway-account` | Account / Project / Billing `/account/v3`, `/billing/v2beta1` | T | G | M |
 

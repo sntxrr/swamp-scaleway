@@ -55,6 +55,21 @@ follows smoke tests + the adversarial-review gate.
 | `@sntxrr/scaleway-iam` | IAM (global) | sync, create, update, delete, list, list-api-keys, list-policies | ✅ built |
 | `@sntxrr/scaleway-secret-manager` | Secret Manager | sync, create, update, delete, list, add-version, access | ✅ built |
 | `@sntxrr/scaleway-secret-manager-vault` | Secret Manager (vault backend) | get, put, list, getName | ✅ built |
+| `@sntxrr/scaleway-elastic-metal` | Bare Metal | sync, create, action, delete, list | ✅ built |
+| `@sntxrr/scaleway-apple-silicon` | Apple silicon (Mac) | sync, create, update, action, delete, list | ✅ built |
+| `@sntxrr/scaleway-redis` | Managed Redis | sync, create, update, delete, list | ✅ built |
+| `@sntxrr/scaleway-mongodb` | Managed MongoDB | sync, create, update, delete, list | ✅ built |
+| `@sntxrr/scaleway-public-gateway` | Public Gateway | sync, create, update, delete, list | ✅ built |
+| `@sntxrr/scaleway-serverless-jobs` | Serverless Jobs | sync, create, update, action, delete, list | ✅ built |
+| `@sntxrr/scaleway-ipam` | IP Address Management | sync, create, update, delete, list | ✅ built |
+| `@sntxrr/scaleway-inference` | Managed Inference | sync, create, update, delete, list | ✅ built |
+| `@sntxrr/scaleway-cockpit` | Observability (Cockpit) | sync, create, delete, list, list-tokens | ✅ built |
+| `@sntxrr/scaleway-messaging` | Messaging & Queuing (NATS) | sync, create, update, delete, list | ✅ built |
+| `@sntxrr/scaleway-tem` | Transactional Email | sync, create, delete, list, list-emails | ✅ built |
+| `@sntxrr/scaleway-file-storage` | File Storage (managed NFS) | sync, create, update, delete, list | ✅ built |
+| `@sntxrr/scaleway-webhosting` | Web Hosting | sync, create, update, delete, list | ✅ built |
+| `@sntxrr/scaleway-account` | Account / Projects (global) | sync, create, update, delete, list | ✅ built |
+| `@sntxrr/scaleway-inventory` | Cross-service inventory **report** | (report) | ✅ built |
 
 See [PRD.md](./PRD.md) §6 for the full catalog across all three waves.
 

@@ -1,0 +1,22 @@
+manifestVersion: 1
+
+name: "@sntxrr/scaleway-messaging"
+version: "2026.07.17.1"
+description: "Manage a Scaleway Messaging & Queuing (MNQ) NATS account — sync state, create, update, and delete NATS accounts, and discover accounts in a region, via the MNQ API with X-Auth-Token auth."
+repository: "https://github.com/sntxrr/swamp-scaleway"
+
+paths:
+  base: manifest
+
+models:
+  - scaleway_messaging.ts
+
+additionalFiles:
+  - README.md
+  - LICENSE.md
+
+labels:
+  - scaleway
+  - messaging
+  - nats
+  - queuing
