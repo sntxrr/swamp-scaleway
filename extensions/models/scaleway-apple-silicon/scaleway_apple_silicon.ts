@@ -78,6 +78,51 @@ const ServerSchema = z.object({
   observedAt: z.string(),
 });
 
+/**
+ * Snapshot of an available Apple silicon server type (ListServerTypes). The
+ * full API object is preserved under `raw` (it carries specs, stock, and the
+ * minimum lease duration that drives Apple silicon's 24h-minimum billing), with
+ * the most useful fields lifted out for convenience.
+ */
+const ServerTypeSchema = z.object({
+  name: z.string(),
+  stock: z.string().nullable().optional(),
+  minimumLeaseDuration: z.string().nullable().optional(),
+  cpu: z.record(z.string(), z.unknown()).nullable().optional(),
+  memory: z.record(z.string(), z.unknown()).nullable().optional(),
+  disk: z.record(z.string(), z.unknown()).nullable().optional(),
+  raw: z.record(z.string(), z.unknown()),
+  zone: z.string(),
+  observedAt: z.string(),
+});
+
+/** Snapshot of an installable Apple silicon OS image (ListOS). */
+const OsSchema = z.object({
+  id: z.string(),
+  name: z.string().nullable().optional(),
+  version: z.string().nullable().optional(),
+  compatibleServerTypes: z.array(z.string()).nullable().optional(),
+  raw: z.record(z.string(), z.unknown()),
+  zone: z.string(),
+  observedAt: z.string(),
+});
+
+/**
+ * Login details for a provisioned server. SENSITIVE — the `sudoPassword` and
+ * `vncUrl` (which can embed a one-time token) are vaulted before persistence and
+ * never logged. The whole spec is marked `sensitiveOutput: true` as
+ * defence-in-depth (see the `connection` resource + `connection-info` method).
+ */
+const ConnectionSchema = z.object({
+  serverId: z.string(),
+  sshUsername: z.string().nullable().optional(),
+  sudoPassword: z.string().meta({ sensitive: true }).nullable().optional(),
+  vncUrl: z.string().meta({ sensitive: true }).nullable().optional(),
+  ip: z.string().nullable().optional(),
+  zone: z.string(),
+  observedAt: z.string(),
+});
+
 // --- Scaleway HTTP client (canonical — see CONVENTIONS.md §5) ---------------
 async function scalewayFetch<T>(
   g: { secretKey: string; endpoint?: string },
@@ -194,6 +239,21 @@ function toServerResource(
 
 const serversPath = (g: GlobalArgs): string =>
   `/apple-silicon/v1alpha1/zones/${g.zone}/servers`;
+const serverTypesPath = (g: GlobalArgs): string =>
+  `/apple-silicon/v1alpha1/zones/${g.zone}/server-types`;
+const osPath = (g: GlobalArgs): string =>
+  `/apple-silicon/v1alpha1/zones/${g.zone}/os`;
+
+/** Best-effort string coercion for a Scaleway Duration ("86400s" or {seconds}). */
+function durationToString(d: unknown): string | null {
+  if (d === null || d === undefined) return null;
+  if (typeof d === "string") return d;
+  if (typeof d === "object") {
+    const secs = (d as { seconds?: unknown }).seconds;
+    if (secs !== undefined && secs !== null) return `${secs}s`;
+  }
+  return null;
+}
 
 /** The nine Scaleway availability zones (fr-par, nl-ams, pl-waw × 1..3). */
 const SCALEWAY_ZONES: readonly string[] = [
@@ -220,6 +280,26 @@ export const model = {
       schema: ServerSchema,
       lifetime: "infinite" as const,
       garbageCollection: 20,
+    },
+    "server-type": {
+      description: "An available Apple silicon server type (catalog entry)",
+      schema: ServerTypeSchema,
+      lifetime: "infinite" as const,
+      garbageCollection: 20,
+    },
+    "os": {
+      description: "An installable Apple silicon OS image (catalog entry)",
+      schema: OsSchema,
+      lifetime: "infinite" as const,
+      garbageCollection: 20,
+    },
+    "connection": {
+      description:
+        "Sensitive login details (ssh username, sudo password, VNC URL). Vaulted, never logged.",
+      schema: ConnectionSchema,
+      lifetime: "infinite" as const,
+      garbageCollection: 5,
+      sensitiveOutput: true,
     },
   },
   methods: {
@@ -433,6 +513,136 @@ export const model = {
           );
         }
         return { dataHandles: handles };
+      },
+    },
+    "list-server-types": {
+      description:
+        "Discover available Apple silicon server types in the zone (ListServerTypes) — names, stock, specs, and minimum lease duration. Read-only.",
+      arguments: z.object({}),
+      execute: async (
+        _args: Record<string, never>,
+        context: ExecuteContext,
+      ): Promise<{ dataHandles: Array<{ name: string }> }> => {
+        const { globalArgs: g, logger } = context;
+        const types = await scalewayListAll<Record<string, unknown>>(
+          g,
+          serverTypesPath(g),
+          "server_types",
+        );
+        logger.info("Discovered {n} Apple silicon server types in {zone}", {
+          n: types.length,
+          zone: g.zone,
+        });
+        const now = new Date().toISOString();
+        const handles: Array<{ name: string }> = [];
+        for (const t of types) {
+          handles.push(
+            await context.writeResource(
+              "server-type",
+              (t.name as string) ?? crypto.randomUUID(),
+              {
+                name: (t.name as string) ?? "unknown",
+                stock: (t.stock as string) ?? null,
+                minimumLeaseDuration: durationToString(
+                  t.minimum_lease_duration,
+                ),
+                cpu: (t.cpu as Record<string, unknown>) ?? null,
+                memory: (t.memory as Record<string, unknown>) ?? null,
+                disk: (t.disk as Record<string, unknown>) ?? null,
+                raw: t,
+                zone: g.zone,
+                observedAt: now,
+              },
+            ),
+          );
+        }
+        return { dataHandles: handles };
+      },
+    },
+    "list-os": {
+      description:
+        "Discover installable Apple silicon OS images in the zone (ListOS). Read-only.",
+      arguments: z.object({}),
+      execute: async (
+        _args: Record<string, never>,
+        context: ExecuteContext,
+      ): Promise<{ dataHandles: Array<{ name: string }> }> => {
+        const { globalArgs: g, logger } = context;
+        const oses = await scalewayListAll<Record<string, unknown>>(
+          g,
+          osPath(g),
+          "os",
+        );
+        logger.info("Discovered {n} Apple silicon OS images in {zone}", {
+          n: oses.length,
+          zone: g.zone,
+        });
+        const now = new Date().toISOString();
+        const handles: Array<{ name: string }> = [];
+        for (const o of oses) {
+          handles.push(
+            await context.writeResource(
+              "os",
+              (o.id as string) ?? crypto.randomUUID(),
+              {
+                id: (o.id as string) ?? "unknown",
+                name: (o.name as string) ?? null,
+                version: (o.version as string) ?? null,
+                compatibleServerTypes:
+                  (o.compatible_server_types as string[]) ?? null,
+                raw: o,
+                zone: g.zone,
+                observedAt: now,
+              },
+            ),
+          );
+        }
+        return { dataHandles: handles };
+      },
+    },
+    "connection-info": {
+      description:
+        "Capture the server's login details (ssh username, sudo password, VNC " +
+        "URL) into the sensitive, vaulted `connection` resource — never logged. " +
+        "Note: the API may only return the sudo password at create time, so run " +
+        "this soon after `create` (or capture it from the create output).",
+      arguments: z.object({}),
+      execute: async (
+        _args: Record<string, never>,
+        context: ExecuteContext,
+      ): Promise<{ dataHandles: Array<{ name: string }> }> => {
+        const { globalArgs: g, logger } = context;
+        logger.info(
+          "Fetching connection info for Apple silicon server {id}",
+          { id: g.serverId },
+        );
+        const server = await scalewayFetch<Record<string, unknown>>(
+          g,
+          "GET",
+          `${serversPath(g)}/${encodeURIComponent(g.serverId)}`,
+        );
+        // Sensitive fields land ONLY in the `connection` spec (sensitiveOutput,
+        // vaulted before persistence). Never logged, never in the metadata snap.
+        const handle = await context.writeResource("connection", g.serverId, {
+          serverId: (server.id as string) ?? g.serverId,
+          sshUsername: (server.ssh_username as string) ?? null,
+          sudoPassword: (server.sudo_password as string) ?? null,
+          vncUrl: (server.vnc_url as string) ?? null,
+          ip: (server.ip as string) ?? null,
+          zone: g.zone,
+          observedAt: new Date().toISOString(),
+        });
+        // Log only which fields were present — never the values themselves.
+        logger.info(
+          "Captured connection info for server {id} (ssh={ssh} sudo={sudo} vnc={vnc})",
+          {
+            id: g.serverId,
+            ssh: server.ssh_username != null,
+            sudo: server.sudo_password != null,
+            vnc: server.vnc_url != null,
+          },
+        );
+        return { dataHandles: [handle] };
       },
     },
   },

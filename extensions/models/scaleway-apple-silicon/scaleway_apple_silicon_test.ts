@@ -297,3 +297,135 @@ Deno.test("serversPath targets the apple-silicon zoned prefix", () => {
     "/apple-silicon/v1alpha1/zones/fr-par-1/servers",
   );
 });
+
+// --- discovery + connection-info (added for the Apple silicon trial) --------
+
+Deno.test("list-server-types GETs /server-types, keys by name, lifts stock + minimum lease", async () => {
+  const { ctx, writes } = makeContext();
+  let url = "";
+  await withMockedFetch(
+    (u) => {
+      url = u;
+      return new Response(
+        JSON.stringify({
+          server_types: [
+            {
+              name: "M4-M",
+              stock: "low_stock",
+              minimum_lease_duration: "86400s",
+              cpu: { name: "Apple M4", core_count: 10 },
+              memory: { capacity: 16000000000 },
+              disk: { capacity: 256000000000 },
+            },
+            // second form: Duration as an object {seconds}
+            {
+              name: "M2-L-ASAHI",
+              stock: { unexpected: true },
+              minimum_lease_duration: { seconds: "86400" },
+            },
+          ],
+        }),
+        { status: 200 },
+      );
+    },
+    () => model.methods["list-server-types"].execute({}, ctx),
+  );
+  assertStringIncludes(
+    url,
+    "/apple-silicon/v1alpha1/zones/fr-par-1/server-types",
+  );
+  assertEquals(writes.length, 2);
+  assertEquals(writes[0].spec, "server-type");
+  assertEquals(writes[0].name, "M4-M");
+  assertEquals(writes[0].data.stock, "low_stock");
+  assertEquals(writes[0].data.minimumLeaseDuration, "86400s");
+  // Duration-object form is coerced to "<seconds>s".
+  assertEquals(writes[1].data.minimumLeaseDuration, "86400s");
+  // The full API object is preserved under `raw`.
+  assertEquals((writes[0].data.raw as Record<string, unknown>).name, "M4-M");
+});
+
+Deno.test("list-os GETs /os, keys by id, maps compatible server types", async () => {
+  const { ctx, writes } = makeContext();
+  let url = "";
+  await withMockedFetch(
+    (u) => {
+      url = u;
+      return new Response(
+        JSON.stringify({
+          os: [
+            {
+              id: "decafedd-9f25-4e16-b86b-47c5a6c6577b",
+              name: "fedora-asahi-remix",
+              version: "42",
+              compatible_server_types: ["M2-L-ASAHI"],
+            },
+          ],
+        }),
+        { status: 200 },
+      );
+    },
+    () => model.methods["list-os"].execute({}, ctx),
+  );
+  assertStringIncludes(url, "/apple-silicon/v1alpha1/zones/fr-par-1/os");
+  assertEquals(writes[0].spec, "os");
+  assertEquals(writes[0].name, "decafedd-9f25-4e16-b86b-47c5a6c6577b");
+  assertEquals(writes[0].data.version, "42");
+  assertEquals(writes[0].data.compatibleServerTypes, ["M2-L-ASAHI"]);
+});
+
+Deno.test("connection-info surfaces creds in the connection resource but never logs them", async () => {
+  const writes: Array<
+    { spec: string; name: string; data: Record<string, unknown> }
+  > = [];
+  const logs: string[] = [];
+  // deno-lint-ignore no-explicit-any
+  const record = (msg: string, props?: Record<string, unknown>) =>
+    logs.push(msg + " " + JSON.stringify(props ?? {}));
+  const ctx = {
+    globalArgs: G,
+    logger: { info: record, warn: record },
+    writeResource: (
+      spec: string,
+      name: string,
+      data: Record<string, unknown>,
+    ) => {
+      writes.push({ spec, name, data });
+      return Promise.resolve({ name });
+    },
+    // deno-lint-ignore no-explicit-any
+  } as any;
+
+  await withMockedFetch(
+    () =>
+      new Response(
+        JSON.stringify({
+          id: G.serverId,
+          status: "ready",
+          ssh_username: "m1",
+          sudo_password: "s3cr3t-passw0rd",
+          vnc_url: "vnc://192.0.2.10?token=abc123",
+          ip: "192.0.2.10",
+        }),
+        { status: 200 },
+      ),
+    () => model.methods["connection-info"].execute({}, ctx),
+  );
+
+  // The creds ARE captured (so the model is actually usable)…
+  assertEquals(writes.length, 1);
+  assertEquals(writes[0].spec, "connection");
+  assertEquals(writes[0].name, G.serverId);
+  assertEquals(writes[0].data.sshUsername, "m1");
+  assertEquals(writes[0].data.sudoPassword, "s3cr3t-passw0rd");
+  assertEquals(writes[0].data.vncUrl, "vnc://192.0.2.10?token=abc123");
+
+  // …but they must NEVER appear in any log line.
+  const allLogs = logs.join("\n");
+  assert(!allLogs.includes("s3cr3t-passw0rd"), "sudo password leaked to logs");
+  assert(!allLogs.includes("token=abc123"), "vnc token leaked to logs");
+});
+
+Deno.test("the connection resource spec is marked sensitiveOutput", () => {
+  assertEquals(model.resources["connection"].sensitiveOutput, true);
+});
