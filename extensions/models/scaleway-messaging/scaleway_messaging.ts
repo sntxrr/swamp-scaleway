@@ -73,6 +73,9 @@ const NatsAccountSchema = z.object({
   observedAt: z.string().describe(
     "Timestamp when this snapshot was taken (ISO 8601).",
   ),
+  absent: z.boolean().nullable().optional().describe(
+    "True when the NATS account has been deleted and no longer exists.",
+  ),
 });
 
 // --- Scaleway HTTP client (canonical — see CONVENTIONS.md §5) ---------------
@@ -354,7 +357,7 @@ export const model = {
         const snapshot = absent
           ? {
             ...toNatsAccountResource({ id: g.natsAccountId }, g, observedAt),
-            status: "absent",
+            absent: true,
           }
           : toNatsAccountResource(
             res ?? { id: g.natsAccountId },

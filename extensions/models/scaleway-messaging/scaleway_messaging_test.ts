@@ -196,7 +196,7 @@ Deno.test("delete treats a 404 as success and writes an absent snapshot", async 
   assertEquals(writes.length, 1);
   assertEquals(writes[0].name, G.natsAccountId);
   assertEquals(writes[0].data.id, G.natsAccountId);
-  assertEquals(writes[0].data.status, "absent");
+  assertEquals(writes[0].data.absent, true);
 });
 
 Deno.test("list aggregates pages until total_count is reached", async () => {

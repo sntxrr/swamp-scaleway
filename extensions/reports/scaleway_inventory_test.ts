@@ -204,3 +204,49 @@ Deno.test("handles an empty repository", async () => {
   assertEquals(result.json.serviceCount, 0);
   assertStringIncludes(result.markdown, "No Scaleway resource data found");
 });
+
+Deno.test("coerces a ModelType value object from the real repository", async () => {
+  // Production `findAllGlobal` returns `modelType` as a ModelType value object
+  // (`.normalized`/`.raw`/`toString()`), never a plain string — string methods
+  // like `.lastIndexOf` would throw. This exercises the coercion path directly
+  // (the createReportTestContext mock only ever supplies strings).
+  const modelType = (normalized: string) => ({
+    raw: normalized,
+    normalized,
+    toString: () => normalized,
+  });
+  const snap = new TextEncoder().encode(JSON.stringify({
+    id: "srv-9",
+    name: "api",
+    state: "running",
+    zone: "fr-par-2",
+  }));
+  const context = {
+    modelType: "@sntxrr/scaleway-instance",
+    modelId: "fleet",
+    logger: { info: () => {} },
+    dataRepository: {
+      findAllGlobal: () =>
+        Promise.resolve([
+          {
+            modelType: modelType("@sntxrr/scaleway-instance"),
+            modelId: "api",
+            data: { name: "latest", version: 1 },
+          },
+          // A non-Scaleway ModelType object must still be excluded.
+          {
+            modelType: modelType("@acme/aws-ec2"),
+            modelId: "i-1",
+            data: { name: "latest", version: 1 },
+          },
+        ]),
+      getContent: () => Promise.resolve(snap),
+    },
+  } as unknown as InventoryReportContext;
+
+  const result = await report.execute(context);
+  assertEquals(result.json.totalResources, 1);
+  const byService = result.json.byService as Record<string, { count: number }>;
+  assertEquals(byService["instance"].count, 1);
+  assertEquals(byService["aws-ec2"], undefined);
+});

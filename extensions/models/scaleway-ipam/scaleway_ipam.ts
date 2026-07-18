@@ -105,6 +105,9 @@ const IpSchema = z.object({
   observedAt: z.string().describe(
     "Timestamp when this snapshot was taken (ISO 8601).",
   ),
+  absent: z.boolean().nullable().optional().describe(
+    "True when the IP has been released and no longer exists.",
+  ),
 });
 
 // --- Scaleway HTTP client (canonical — see CONVENTIONS.md §5) ---------------
@@ -379,7 +382,7 @@ export const model = {
         }
         const observedAt = new Date().toISOString();
         const snapshot = absent
-          ? { ...toIpResource({ id: g.ipId }, g, observedAt), status: "absent" }
+          ? { ...toIpResource({ id: g.ipId }, g, observedAt), absent: true }
           : toIpResource(res ?? { id: g.ipId }, g, observedAt);
         const handle = await context.writeResource("ip", g.ipId, snapshot);
         logger.info("Released Scaleway IPAM IP {id} (absent={absent})", {
