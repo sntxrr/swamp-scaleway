@@ -201,6 +201,45 @@ Deno.test("delete treats a 404 as success and writes an absent snapshot", async 
   assertEquals(writes[0].data.status, "absent");
 });
 
+Deno.test("delete treats a 412 resource_not_usable (already deleted) as success", async () => {
+  const { ctx, writes } = makeContext();
+  await withMockedFetch(
+    () =>
+      new Response(
+        JSON.stringify({
+          help_message: "cannot act on deleted resource",
+          precondition: "resource_not_usable",
+          type: "precondition_failed",
+        }),
+        { status: 412 },
+      ),
+    () => model.methods.delete.execute({}, ctx),
+  );
+  assertEquals(writes.length, 1);
+  assertEquals(writes[0].data.status, "absent");
+});
+
+Deno.test("delete re-throws a 412 that is not resource_not_usable", async () => {
+  const { ctx, writes } = makeContext();
+  await withMockedFetch(
+    () =>
+      new Response(
+        JSON.stringify({ precondition: "locked", type: "precondition_failed" }),
+        { status: 412 },
+      ),
+    async () => {
+      let threw = false;
+      try {
+        await model.methods.delete.execute({}, ctx);
+      } catch {
+        threw = true;
+      }
+      assert(threw, "expected a non-resource_not_usable 412 to re-throw");
+    },
+  );
+  assertEquals(writes.length, 0);
+});
+
 Deno.test("list aggregates pages until total_count is reached", async () => {
   const { ctx, writes } = makeContext();
   await withMockedFetch(

@@ -9,6 +9,13 @@ could not catch.
 7 of 9 services pass a full clean lifecycle: **vpc, registry, messaging, iam,
 cockpit, account, object-storage**.
 
+> **STATUS: FIXED (2026-07-18).** Both `delete` methods now treat
+> `status === 412 && /resource_not_usable/.test(err.message)` as already-gone,
+> with unit tests (412-absent + non-resource_not_usable-412-rethrows) and live
+> re-verification (secret-manager full green; key-manager idempotency path green).
+> A rare transient first-delete failure on a just-created KMS key was observed
+> (API eventual-consistency, ~1 in a run) — not a code defect; noted as N2.
+
 ### F1 — idempotent `delete` misses Scaleway's 412 "already deleted" signal (REAL BUG)
 
 **Services:** `secret-manager`, `key-manager` (both regional). Likely a

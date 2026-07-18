@@ -335,7 +335,7 @@ const secretsPath = (g: GlobalArgs): string =>
 /** Scaleway Secret Manager model — one instance per secret, keyed by secretId. */
 export const model = {
   type: "@sntxrr/scaleway-secret-manager",
-  version: "2026.07.17.1",
+  version: "2026.07.18.1",
   globalArguments: GlobalArgsSchema,
   resources: {
     "secret": {
@@ -497,7 +497,15 @@ export const model = {
             `${secretsPath(g)}/${encodeURIComponent(g.secretId)}`,
           );
         } catch (e) {
-          if ((e as { status?: number }).status !== 404) throw e;
+          // Idempotent delete: already-gone → success. Scaleway signals this as
+          // a 404, OR a 412 "precondition failed" with precondition
+          // "resource_not_usable" ("cannot act on deleted ...") once the secret
+          // is already deleted. Re-throw anything else (CONVENTIONS.md §3.2).
+          const err = e as { status?: number; message?: string };
+          const alreadyGone = err.status === 404 ||
+            (err.status === 412 &&
+              /resource_not_usable/.test(err.message ?? ""));
+          if (!alreadyGone) throw e;
           absent = true;
         }
         const observedAt = new Date().toISOString();

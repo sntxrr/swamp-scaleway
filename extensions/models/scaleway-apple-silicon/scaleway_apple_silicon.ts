@@ -272,7 +272,7 @@ const SCALEWAY_ZONES: readonly string[] = [
 /** Scaleway Apple silicon model — one instance per Mac mini, keyed by serverId. */
 export const model = {
   type: "@sntxrr/scaleway-apple-silicon",
-  version: "2026.07.17.1",
+  version: "2026.07.18.1",
   globalArguments: GlobalArgsSchema,
   resources: {
     "server": {
