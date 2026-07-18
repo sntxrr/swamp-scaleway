@@ -1,0 +1,23 @@
+manifestVersion: 1
+
+name: "@sntxrr/scaleway-key-manager"
+version: "2026.07.17.1"
+description: "Manage a Scaleway Key Manager (KMS) key — sync metadata, create, delete, rotate, list keys in a region, and encrypt/decrypt data, via the Key Manager API with X-Auth-Token auth. Plaintext is handled as sensitive and never logged or stored."
+repository: "https://github.com/sntxrr/swamp-scaleway"
+
+paths:
+  base: manifest
+
+models:
+  - scaleway_key_manager.ts
+
+additionalFiles:
+  - README.md
+  - LICENSE.md
+
+labels:
+  - scaleway
+  - security
+  - kms
+  - key-manager
+  - encryption
