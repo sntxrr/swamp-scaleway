@@ -1,0 +1,22 @@
+manifestVersion: 1
+
+name: "@sntxrr/scaleway-secret-manager-vault"
+version: "2026.07.17.1"
+description: "A swamp vault backend backed by Scaleway Secret Manager — source other models' secrets from Scaleway with vault.get(...) expressions, authenticated via X-Auth-Token."
+repository: "https://github.com/sntxrr/swamp-scaleway"
+
+paths:
+  base: manifest
+
+vaults:
+  - mod.ts
+
+additionalFiles:
+  - README.md
+  - LICENSE.md
+
+labels:
+  - scaleway
+  - security
+  - secret-manager
+  - vault

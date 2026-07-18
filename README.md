@@ -45,8 +45,16 @@ follows smoke tests + the adversarial-review gate.
 | `@sntxrr/scaleway-vpc` | VPC & Private Networks | sync, create, delete, list, list-private-networks | ✅ built |
 | `@sntxrr/scaleway-rdb` | Managed Database (PG/MySQL) | sync, create, update, delete, list | ✅ built |
 | `@sntxrr/scaleway-dns` | Domains & DNS | sync, list-records, list-zones, set-records | ✅ built |
-| `@sntxrr/scaleway-load-balancer` | Load Balancer | sync, create, delete, list, list-backends, list-frontends | ✅ built |
-| `@sntxrr/scaleway-object-storage` | Object Storage (S3, SigV4) | list-buckets, create-bucket, delete-bucket, sync, list-objects | ✅ built |
+| `@sntxrr/scaleway-load-balancer` | Load Balancer | sync, create, update, delete, list, list-backends, list-frontends | ✅ built |
+| `@sntxrr/scaleway-object-storage` | Object Storage (S3, SigV4) | list-buckets, create, delete, sync, list-objects | ✅ built |
+| `@sntxrr/scaleway-registry` | Container Registry | sync, create, update, delete, list | ✅ built |
+| `@sntxrr/scaleway-kapsule` | Kubernetes Kapsule | sync, create, update, upgrade, delete, list, list-pools, get-kubeconfig | ✅ built |
+| `@sntxrr/scaleway-serverless-functions` | Serverless Functions | sync, create, update, delete, action, list, list-namespaces | ✅ built |
+| `@sntxrr/scaleway-serverless-containers` | Serverless Containers | sync, create, update, delete, action, list, list-namespaces | ✅ built |
+| `@sntxrr/scaleway-key-manager` | Key Manager (KMS) | sync, create, delete, list, encrypt, decrypt, rotate | ✅ built |
+| `@sntxrr/scaleway-iam` | IAM (global) | sync, create, update, delete, list, list-api-keys, list-policies | ✅ built |
+| `@sntxrr/scaleway-secret-manager` | Secret Manager | sync, create, update, delete, list, add-version, access | ✅ built |
+| `@sntxrr/scaleway-secret-manager-vault` | Secret Manager (vault backend) | get, put, list, getName | ✅ built |
 
 See [PRD.md](./PRD.md) §6 for the full catalog across all three waves.
 
