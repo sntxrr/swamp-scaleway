@@ -313,7 +313,7 @@ const namespacesPath = (g: GlobalArgs): string =>
 /** Scaleway Serverless Containers model — one instance per container, keyed by containerId. */
 export const model = {
   type: "@sntxrr/scaleway-serverless-containers",
-  version: "2026.07.17.1",
+  version: "2026.07.18.1",
   globalArguments: GlobalArgsSchema,
   resources: {
     "container": {

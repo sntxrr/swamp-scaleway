@@ -199,7 +199,7 @@ const natsAccountsPath = (g: GlobalArgs): string =>
 /** Scaleway MNQ NATS account model — one instance per account, keyed by natsAccountId. */
 export const model = {
   type: "@sntxrr/scaleway-messaging",
-  version: "2026.07.17.1",
+  version: "2026.07.18.1",
   globalArguments: GlobalArgsSchema,
   resources: {
     "nats-account": {

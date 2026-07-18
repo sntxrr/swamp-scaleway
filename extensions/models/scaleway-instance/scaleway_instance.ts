@@ -179,7 +179,7 @@ const SCALEWAY_ZONES: readonly string[] = [
 /** Scaleway Instance server model — one instance per server, keyed by serverId. */
 export const model = {
   type: "@sntxrr/scaleway-instance",
-  version: "2026.07.17.1",
+  version: "2026.07.18.1",
   globalArguments: GlobalArgsSchema,
   resources: {
     "server": {

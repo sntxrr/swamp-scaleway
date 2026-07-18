@@ -253,7 +253,7 @@ const SCALEWAY_ZONES: readonly string[] = [
 /** Scaleway Managed Redis model — one instance per cluster, keyed by clusterId. */
 export const model = {
   type: "@sntxrr/scaleway-redis",
-  version: "2026.07.17.1",
+  version: "2026.07.18.1",
   globalArguments: GlobalArgsSchema,
   resources: {
     "cluster": {

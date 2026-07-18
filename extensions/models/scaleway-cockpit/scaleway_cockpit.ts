@@ -254,7 +254,7 @@ const tokensPath = (g: GlobalArgs): string =>
 /** Scaleway Cockpit model — one instance per data source, keyed by dataSourceId. */
 export const model = {
   type: "@sntxrr/scaleway-cockpit",
-  version: "2026.07.17.1",
+  version: "2026.07.18.1",
   globalArguments: GlobalArgsSchema,
   resources: {
     "data-source": {

@@ -242,7 +242,7 @@ const instancesPath = (g: GlobalArgs): string =>
 /** Scaleway Managed MongoDB® model — one instance per database, keyed by instanceId. */
 export const model = {
   type: "@sntxrr/scaleway-mongodb",
-  version: "2026.07.17.1",
+  version: "2026.07.18.1",
   globalArguments: GlobalArgsSchema,
   resources: {
     "instance": {

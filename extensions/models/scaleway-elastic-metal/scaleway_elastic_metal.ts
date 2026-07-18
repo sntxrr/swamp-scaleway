@@ -221,7 +221,7 @@ const SCALEWAY_ZONES: readonly string[] = [
 /** Scaleway Elastic Metal model — one instance per server, keyed by serverId. */
 export const model = {
   type: "@sntxrr/scaleway-elastic-metal",
-  version: "2026.07.17.1",
+  version: "2026.07.18.1",
   globalArguments: GlobalArgsSchema,
   resources: {
     "server": {

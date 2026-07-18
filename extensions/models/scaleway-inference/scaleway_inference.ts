@@ -299,7 +299,7 @@ const deploymentsPath = (g: GlobalArgs): string =>
 /** Scaleway Managed Inference model — one instance per deployment, keyed by deploymentId. */
 export const model = {
   type: "@sntxrr/scaleway-inference",
-  version: "2026.07.17.1",
+  version: "2026.07.18.1",
   globalArguments: GlobalArgsSchema,
   resources: {
     "deployment": {

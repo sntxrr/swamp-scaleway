@@ -256,7 +256,7 @@ async function syncRecords(
 /** Scaleway Domains & DNS model — one instance per DNS zone, keyed by dnsZone. */
 export const model = {
   type: "@sntxrr/scaleway-dns",
-  version: "2026.07.17.1",
+  version: "2026.07.18.1",
   globalArguments: GlobalArgsSchema,
   resources: {
     "record": {

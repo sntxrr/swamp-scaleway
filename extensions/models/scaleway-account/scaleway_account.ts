@@ -195,7 +195,7 @@ const projectsPath = (): string => `/account/v3/projects`;
 /** Scaleway Account model — one instance per Project, keyed by projectId. */
 export const model = {
   type: "@sntxrr/scaleway-account",
-  version: "2026.07.17.1",
+  version: "2026.07.18.1",
   globalArguments: GlobalArgsSchema,
   resources: {
     "project": {

@@ -220,7 +220,7 @@ const filesystemsPath = (g: GlobalArgs): string =>
 /** Scaleway File Storage model — one instance per filesystem, keyed by filesystemId. */
 export const model = {
   type: "@sntxrr/scaleway-file-storage",
-  version: "2026.07.17.1",
+  version: "2026.07.18.1",
   globalArguments: GlobalArgsSchema,
   resources: {
     "filesystem": {

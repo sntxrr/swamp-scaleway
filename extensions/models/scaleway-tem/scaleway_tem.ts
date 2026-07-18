@@ -259,7 +259,7 @@ const emailsPath = (g: GlobalArgs): string =>
 /** Scaleway Transactional Email model — one instance per sending domain, keyed by domainId. */
 export const model = {
   type: "@sntxrr/scaleway-tem",
-  version: "2026.07.17.1",
+  version: "2026.07.18.1",
   globalArguments: GlobalArgsSchema,
   resources: {
     "domain": {

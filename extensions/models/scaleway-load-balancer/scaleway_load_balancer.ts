@@ -274,7 +274,7 @@ const lbsPath = (g: GlobalArgs): string => `/lb/v1/zones/${g.zone}/lbs`;
 /** Scaleway Load Balancer model — one instance per LB, keyed by lbId. */
 export const model = {
   type: "@sntxrr/scaleway-load-balancer",
-  version: "2026.07.17.1",
+  version: "2026.07.18.1",
   globalArguments: GlobalArgsSchema,
   resources: {
     "loadBalancer": {

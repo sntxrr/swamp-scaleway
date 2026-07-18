@@ -225,7 +225,7 @@ const volumesPath = (g: GlobalArgs): string =>
 /** Scaleway Block Storage model — one instance per volume, keyed by volumeId. */
 export const model = {
   type: "@sntxrr/scaleway-block-storage",
-  version: "2026.07.17.1",
+  version: "2026.07.18.1",
   globalArguments: GlobalArgsSchema,
   resources: {
     "volume": {

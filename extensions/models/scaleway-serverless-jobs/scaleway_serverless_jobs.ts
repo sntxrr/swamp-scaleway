@@ -354,7 +354,7 @@ const jobDefinitionsPath = (g: GlobalArgs): string =>
 /** Scaleway Serverless Jobs model — one instance per job definition, keyed by jobDefinitionId. */
 export const model = {
   type: "@sntxrr/scaleway-serverless-jobs",
-  version: "2026.07.17.1",
+  version: "2026.07.18.1",
   globalArguments: GlobalArgsSchema,
   resources: {
     "job-definition": {

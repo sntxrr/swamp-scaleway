@@ -1,7 +1,7 @@
 manifestVersion: 1
 
 name: "@sntxrr/scaleway-object-storage"
-version: "2026.07.17.1"
+version: "2026.07.18.1"
 description: "Manage a Scaleway Object Storage (S3-compatible) bucket — list-buckets, create, delete, sync, and list-objects — via the S3 API with AWS Signature V4 signing (access key + secret key), not X-Auth-Token."
 repository: "https://github.com/sntxrr/swamp-scaleway"
 

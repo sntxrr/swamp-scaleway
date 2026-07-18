@@ -1,7 +1,7 @@
 manifestVersion: 1
 
 name: "@sntxrr/scaleway-inference"
-version: "2026.07.17.1"
+version: "2026.07.18.1"
 description: "Manage a Scaleway Managed Inference deployment — sync state, create, update, and delete dedicated model serving deployments, and discover deployments in a region, via the Managed Inference API with X-Auth-Token auth."
 repository: "https://github.com/sntxrr/swamp-scaleway"
 

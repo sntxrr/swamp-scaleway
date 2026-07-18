@@ -243,7 +243,7 @@ const hostingsPath = (g: GlobalArgs): string =>
 /** Scaleway Web Hosting model — one instance per plan, keyed by hostingId. */
 export const model = {
   type: "@sntxrr/scaleway-webhosting",
-  version: "2026.07.17.1",
+  version: "2026.07.18.1",
   globalArguments: GlobalArgsSchema,
   resources: {
     "hosting": {

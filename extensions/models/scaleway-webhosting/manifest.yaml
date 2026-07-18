@@ -1,7 +1,7 @@
 manifestVersion: 1
 
 name: "@sntxrr/scaleway-webhosting"
-version: "2026.07.17.1"
+version: "2026.07.18.1"
 description: "Manage a Scaleway Web Hosting plan — sync state, create, update, and delete hosting plans, and discover plans in a region, via the Web Hosting API with X-Auth-Token auth."
 repository: "https://github.com/sntxrr/swamp-scaleway"
 

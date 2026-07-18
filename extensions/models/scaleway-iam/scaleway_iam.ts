@@ -347,7 +347,7 @@ const policiesPath = (): string => `/iam/v1alpha1/policies`;
 /** Scaleway IAM model — one instance per application, keyed by applicationId. */
 export const model = {
   type: "@sntxrr/scaleway-iam",
-  version: "2026.07.17.1",
+  version: "2026.07.18.1",
   globalArguments: GlobalArgsSchema,
   resources: {
     "application": {

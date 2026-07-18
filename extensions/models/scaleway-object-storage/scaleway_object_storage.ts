@@ -461,7 +461,7 @@ const SCALEWAY_REGIONS: readonly string[] = ["fr-par", "nl-ams", "pl-waw"];
  */
 export const model = {
   type: "@sntxrr/scaleway-object-storage",
-  version: "2026.07.17.1",
+  version: "2026.07.18.1",
   globalArguments: GlobalArgsSchema,
   resources: {
     "bucket": {

@@ -234,7 +234,7 @@ const ipsPath = (g: GlobalArgs): string => `/ipam/v1/regions/${g.region}/ips`;
 /** Scaleway IPAM model — one instance per managed IP address, keyed by ipId. */
 export const model = {
   type: "@sntxrr/scaleway-ipam",
-  version: "2026.07.17.1",
+  version: "2026.07.18.1",
   globalArguments: GlobalArgsSchema,
   resources: {
     "ip": {

@@ -326,7 +326,7 @@ const namespacesPath = (g: GlobalArgs): string =>
 /** Scaleway Serverless Functions model — one instance per function, keyed by functionId. */
 export const model = {
   type: "@sntxrr/scaleway-serverless-functions",
-  version: "2026.07.17.1",
+  version: "2026.07.18.1",
   globalArguments: GlobalArgsSchema,
   resources: {
     "function": {

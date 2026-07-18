@@ -237,7 +237,7 @@ const gatewaysPath = (g: GlobalArgs): string =>
 /** Scaleway Public Gateway model — one instance per gateway, keyed by gatewayId. */
 export const model = {
   type: "@sntxrr/scaleway-public-gateway",
-  version: "2026.07.17.1",
+  version: "2026.07.18.1",
   globalArguments: GlobalArgsSchema,
   resources: {
     "gateway": {

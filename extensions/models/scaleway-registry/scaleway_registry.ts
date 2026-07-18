@@ -227,7 +227,7 @@ const namespacesPath = (g: GlobalArgs): string =>
 /** Scaleway Container Registry model — one instance per namespace, keyed by namespaceId. */
 export const model = {
   type: "@sntxrr/scaleway-registry",
-  version: "2026.07.17.1",
+  version: "2026.07.18.1",
   globalArguments: GlobalArgsSchema,
   resources: {
     "namespace": {
