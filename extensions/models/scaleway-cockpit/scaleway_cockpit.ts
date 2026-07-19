@@ -284,7 +284,7 @@ function requireDataSourceId(g: GlobalArgs, method: string): string {
 /** Scaleway Cockpit model — one instance per data source, keyed by dataSourceId. */
 export const model = {
   type: "@sntxrr/scaleway-cockpit",
-  version: "2026.07.19.1",
+  version: "2026.07.19.2",
   globalArguments: GlobalArgsSchema,
   resources: {
     "data-source": {
@@ -454,9 +454,11 @@ export const model = {
         context: ExecuteContext,
       ): Promise<{ dataHandles: Array<{ name: string }> }> => {
         const { globalArgs: g, logger } = context;
+        // Cockpit's ListDataSources requires project_id as a query param —
+        // omitting it returns 400 "value must be a valid UUID".
         const dataSources = await scalewayListAll<Record<string, unknown>>(
           g,
-          dataSourcesPath(g),
+          `${dataSourcesPath(g)}?project_id=${encodeURIComponent(g.projectId)}`,
           "data_sources",
         );
         logger.info("Discovered {n} data sources in {region}", {
@@ -486,9 +488,11 @@ export const model = {
         context: ExecuteContext,
       ): Promise<{ dataHandles: Array<{ name: string }> }> => {
         const { globalArgs: g, logger } = context;
+        // ListTokens requires project_id as a query param, same as
+        // ListDataSources — omitting it returns a 400.
         const tokens = await scalewayListAll<Record<string, unknown>>(
           g,
-          tokensPath(g),
+          `${tokensPath(g)}?project_id=${encodeURIComponent(g.projectId)}`,
           "tokens",
         );
         logger.info("Discovered {n} tokens in {region}", {

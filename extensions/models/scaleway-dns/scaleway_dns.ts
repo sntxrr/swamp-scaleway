@@ -28,8 +28,10 @@ const GlobalArgsSchema = z.object({
   projectId: z.string().describe(
     "Scaleway Project ID that owns the DNS zone.",
   ),
-  dnsZone: z.string().describe(
-    "The DNS zone (domain name) this model manages, e.g. example.com.",
+  dnsZone: z.string().optional().describe(
+    "The DNS zone (domain name) this model manages, e.g. example.com. " +
+      "Optional — the `list-zones` factory discovers every zone in the " +
+      "project; every other method requires it.",
   ),
   endpoint: z.string().optional().describe(
     "Override the API host. Defaults to https://api.scaleway.com.",
@@ -207,7 +209,7 @@ function toRecordResource(
     data: (r.data as string) ?? "",
     priority: (r.priority as number) ?? null,
     comment: (r.comment as string) ?? null,
-    dnsZone: g.dnsZone,
+    dnsZone: g.dnsZone ?? "",
     observedAt,
   };
 }
@@ -230,27 +232,48 @@ function toZoneResource(
 }
 
 /** Records collection path for a zone (global scope — no zone/region segment). */
-const recordsPath = (g: GlobalArgs): string =>
-  `/domain/v2beta1/dns-zones/${encodeURIComponent(g.dnsZone)}/records`;
+const recordsPath = (dnsZone: string): string =>
+  `/domain/v2beta1/dns-zones/${encodeURIComponent(dnsZone)}/records`;
 
 /** DNS zones collection path (global scope — no zone/region segment). */
 const zonesPath = (): string => `/domain/v2beta1/dns-zones`;
+
+/**
+ * Resolve the managed DNS zone for methods that act on one specific zone.
+ *
+ * `dnsZone` is optional in the global schema so the `list-zones` factory can
+ * discover every zone in the project without the caller inventing a throwaway
+ * placeholder. Every other method targets one zone and calls this to fail fast
+ * with an actionable message.
+ */
+function requireDnsZone(g: GlobalArgs, method: string): string {
+  if (!g.dnsZone || g.dnsZone.trim() === "") {
+    throw new Error(
+      `The "${method}" method requires globalArgs.dnsZone — the domain name of ` +
+        `the zone to operate on. Set dnsZone on the model, or use "list-zones" ` +
+        `to discover the zones in this project.`,
+    );
+  }
+  return g.dnsZone;
+}
 
 // --- Shared method logic ---------------------------------------------------
 /** Fetch every record in the managed zone and write a snapshot per record. */
 async function syncRecords(
   context: ExecuteContext,
+  method: string,
 ): Promise<{ dataHandles: Array<{ name: string }> }> {
   const { globalArgs: g, logger } = context;
-  logger.info("Listing records for DNS zone {zone}", { zone: g.dnsZone });
+  const dnsZone = requireDnsZone(g, method);
+  logger.info("Listing records for DNS zone {zone}", { zone: dnsZone });
   const records = await scalewayListAll<Record<string, unknown>>(
     g,
-    recordsPath(g),
+    recordsPath(dnsZone),
     "records",
   );
   logger.info("Found {n} records in {zone}", {
     n: records.length,
-    zone: g.dnsZone,
+    zone: dnsZone,
   });
   const now = new Date().toISOString();
   const handles: Array<{ name: string }> = [];
@@ -270,7 +293,7 @@ async function syncRecords(
 /** Scaleway Domains & DNS model — one instance per DNS zone, keyed by dnsZone. */
 export const model = {
   type: "@sntxrr/scaleway-dns",
-  version: "2026.07.19.1",
+  version: "2026.07.19.2",
   globalArguments: GlobalArgsSchema,
   resources: {
     "record": {
@@ -291,6 +314,10 @@ export const model = {
       description:
         "A DNS mutation must target a zone: globalArgs.dnsZone must be set.",
       labels: ["policy"],
+      // Scoped explicitly: without appliesTo this also gated the `list-zones`
+      // factory, which discovers zones across the project and has no single
+      // zone to target.
+      appliesTo: ["create", "update", "delete"],
       execute: (
         context: { globalArgs: GlobalArgs },
       ): { pass: boolean; errors?: string[] } => {
@@ -316,7 +343,7 @@ export const model = {
         _args: Record<string, never>,
         context: ExecuteContext,
       ): Promise<{ dataHandles: Array<{ name: string }> }> =>
-        syncRecords(context),
+        syncRecords(context, "sync"),
     },
     "list-records": {
       description:
@@ -326,7 +353,7 @@ export const model = {
         _args: Record<string, never>,
         context: ExecuteContext,
       ): Promise<{ dataHandles: Array<{ name: string }> }> =>
-        syncRecords(context),
+        syncRecords(context, "list-records"),
     },
     "list-zones": {
       description:
@@ -375,17 +402,18 @@ export const model = {
         // zone is created when the domain is registered/added to the account,
         // not via this API. Derive {subdomain, domain} from the managed dnsZone
         // (strip the first label) unless the caller overrides them.
-        const labels = g.dnsZone.split(".");
+        const dnsZone = requireDnsZone(g, "create");
+        const labels = dnsZone.split(".");
         const subdomain = args.subdomain ??
           (labels.length >= 3 ? labels[0] : "");
         const domain = args.domain ??
-          (labels.length >= 3 ? labels.slice(1).join(".") : g.dnsZone);
+          (labels.length >= 3 ? labels.slice(1).join(".") : dnsZone);
         if (!subdomain) {
           throw new Error(
-            `Cannot create an apex DNS zone for "${g.dnsZone}" — Scaleway's ` +
+            `Cannot create an apex DNS zone for "${dnsZone}" — Scaleway's ` +
               `CreateDNSZone requires a subdomain (the root zone is created when ` +
               `the domain is registered/added to your account). Set dnsZone to ` +
-              `"<label>.${g.dnsZone}", or pass an explicit subdomain argument.`,
+              `"<label>.${dnsZone}", or pass an explicit subdomain argument.`,
           );
         }
         logger.info(
@@ -426,12 +454,13 @@ export const model = {
         context: ExecuteContext,
       ): Promise<{ dataHandles: Array<{ name: string }> }> => {
         const { globalArgs: g, logger } = context;
+        const dnsZone = requireDnsZone(g, "delete");
         logger.info("Deleting DNS zone {zone} in project {project}", {
-          zone: g.dnsZone,
+          zone: dnsZone,
           project: g.projectId,
         });
         const path = `${zonesPath()}?dns_zone=${
-          encodeURIComponent(g.dnsZone)
+          encodeURIComponent(dnsZone)
         }&project_id=${encodeURIComponent(g.projectId)}`;
         let zoneRaw: Record<string, unknown> = {};
         try {
@@ -445,19 +474,19 @@ export const model = {
         } catch (e) {
           if ((e as { status?: number }).status !== 404) throw e;
           logger.info("DNS zone {zone} already absent (404)", {
-            zone: g.dnsZone,
+            zone: dnsZone,
           });
         }
         const now = new Date().toISOString();
         // Guarantee the required schema fields even when the API returned
         // nothing (404) — real values from the response win when present.
-        const merged = { domain: g.dnsZone, status: "deleted", ...zoneRaw };
+        const merged = { domain: dnsZone, status: "deleted", ...zoneRaw };
         const handle = await context.writeResource(
           "zone",
-          g.dnsZone,
+          dnsZone,
           toZoneResource(merged, now),
         );
-        logger.info("Deleted DNS zone {zone}", { zone: g.dnsZone });
+        logger.info("Deleted DNS zone {zone}", { zone: dnsZone });
         return { dataHandles: [handle] };
       },
     },
@@ -470,16 +499,17 @@ export const model = {
         context: ExecuteContext,
       ): Promise<{ dataHandles: Array<{ name: string }> }> => {
         const { globalArgs: g, logger } = context;
+        const dnsZone = requireDnsZone(g, "update");
         logger.info("Applying {n} record changes to {zone}", {
           n: args.changes.length,
-          zone: g.dnsZone,
+          zone: dnsZone,
         });
         const res = await scalewayFetch<
           { records?: Record<string, unknown>[] }
         >(
           g,
           "PATCH",
-          recordsPath(g),
+          recordsPath(dnsZone),
           {
             changes: args.changes,
             return_all_records: args.returnAllRecords ?? true,
@@ -499,7 +529,7 @@ export const model = {
         logger.info(
           "Applied record changes to {zone}; snapshotted {n} records",
           {
-            zone: g.dnsZone,
+            zone: dnsZone,
             n: handles.length,
           },
         );

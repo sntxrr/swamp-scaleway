@@ -344,8 +344,69 @@ Deno.test("a non-2xx response throws and writes nothing", async () => {
 
 Deno.test("recordsPath and zonesPath are global (no zone/region segment)", () => {
   assertEquals(
-    _internal.recordsPath(G),
+    _internal.recordsPath(G.dnsZone),
     "/domain/v2beta1/dns-zones/example.com/records",
   );
   assertEquals(_internal.zonesPath(), "/domain/v2beta1/dns-zones");
 });
+
+// --- dnsZone is optional: list-zones discovers, other methods require it ----
+
+Deno.test("list-zones works with no dnsZone set (no placeholder needed)", async () => {
+  const { ctx, writes } = makeContext({ dnsZone: undefined });
+  await withMockedFetch(
+    () =>
+      new Response(
+        JSON.stringify({
+          dns_zones: [
+            { domain: "a.example", subdomain: "", status: "active" },
+            { domain: "b.example", subdomain: "", status: "active" },
+          ],
+          total_count: 2,
+        }),
+        { status: 200 },
+      ),
+    () => model.methods["list-zones"].execute({}, ctx),
+  );
+  // Discovered zones come from the API, never from a preset globalArg.
+  assertEquals(writes.length, 2);
+});
+
+for (
+  const [method, args] of [
+    ["sync", {}],
+    ["list-records", {}],
+    ["create", {}],
+    ["delete", {}],
+    ["update", { changes: [] }],
+  ] as const
+) {
+  Deno.test(`${method} fails fast with an actionable error when dnsZone is absent`, async () => {
+    const { ctx, writes } = makeContext({ dnsZone: undefined });
+    let fetched = false;
+    // The guard runs before arguments are read, so valid args still throw.
+    const exec = model.methods[method].execute as unknown as (
+      a: unknown,
+      c: unknown,
+    ) => Promise<unknown>;
+    const err = await withMockedFetch(
+      () => {
+        fetched = true;
+        return new Response("{}", { status: 200 });
+      },
+      async () => {
+        try {
+          await exec(args, ctx);
+          return null;
+        } catch (e) {
+          return e as Error;
+        }
+      },
+    );
+    assert(err !== null, `${method} should throw when dnsZone is missing`);
+    assertStringIncludes(err.message, "dnsZone");
+    assertStringIncludes(err.message, method);
+    assertEquals(fetched, false);
+    assertEquals(writes.length, 0);
+  });
+}

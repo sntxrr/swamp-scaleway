@@ -63,12 +63,12 @@ and fails fast if `dnsZone` is empty.
 
 ## Global arguments
 
-| Arg         | Required | Default                    | Description                                            |
-| ----------- | -------- | -------------------------- | ------------------------------------------------------ |
-| `secretKey` | yes      | —                          | Scaleway API secret key (sensitive; wire from a vault) |
-| `projectId` | yes      | —                          | Project ID that owns the DNS zone                      |
-| `dnsZone`   | yes      | —                          | DNS zone (domain name) this model manages              |
-| `endpoint`  | no       | `https://api.scaleway.com` | Override the API host                                  |
+| Arg         | Required    | Default                    | Description                                                                                         |
+| ----------- | ----------- | -------------------------- | --------------------------------------------------------------------------------------------------- |
+| `secretKey` | yes         | —                          | Scaleway API secret key (sensitive; wire from a vault)                                              |
+| `projectId` | yes         | —                          | Project ID that owns the DNS zone                                                                   |
+| `dnsZone`   | conditional | —                          | DNS zone (domain name) this model manages. Required by every method except the `list-zones` factory |
+| `endpoint`  | no          | `https://api.scaleway.com` | Override the API host                                                                               |
 
 > No `zone`/`region` argument — the Domains & DNS API is global.
 

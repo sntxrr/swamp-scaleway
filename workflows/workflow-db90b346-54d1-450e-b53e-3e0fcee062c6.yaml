@@ -1,21 +1,21 @@
 id: db90b346-54d1-450e-b53e-3e0fcee062c6
 name: fleet-inventory
 description: >-
-  Read-only sweep of a Scaleway project, producing a fresh data snapshot per
-  resource. Every step calls a factory `list` method, so one step discovers all
-  resources of that type — no per-resource looping and no lock contention.
+  Full read-only inventory of a Scaleway account: every resource type, in every
+  region and availability zone. Each step calls a factory `list` method, so one
+  step discovers all resources of that type in one scope — no per-resource
+  looping.
 
-  Steps are best-effort (allowFailure): a service the project doesn't use, or
-  lacks permission for, degrades that one step instead of failing the sweep.
+  Steps fan out with forEach across inputs.regions / inputs.zones, and each
+  writes data varied by that dimension, so fr-par and nl-ams results version
+  independently rather than overwriting one another.
 
-  Jobs split by API scoping because Scaleway scopes these services differently
-  (region vs availability zone). The two jobs are independent and run
-  concurrently. Each step targets a distinct model type AND a distinct
-  modelName, so no two steps serialise on the same per-model lock.
+  Every step is allowFailure: a service the account doesn't use, isn't entitled
+  to, or that rejects a scope (webhosting is fr-par-only; public-gateway serves
+  it-mil-1 but not fr-par-3) degrades that one step instead of the sweep.
 
-  Because swamp versions every data write, re-running this on a schedule turns
-  the snapshots into a drift record — `swamp data list <name>` shows what
-  changed between sweeps.
+  Because swamp versions every data write, re-running turns these snapshots into
+  a drift record: `swamp data list <name>` shows what changed between sweeps.
 tags: {}
 
 # Scheduled runs get no --input, so trigger.inputs supplies the baseline.
@@ -23,33 +23,92 @@ tags: {}
 trigger:
   schedule: "0 6 * * *"
   inputs:
-    projectId: ba69f52d-b3fa-445e-942d-6614ff9f5ceb
+    projectId: 76775539-7ff9-4f1a-a0f2-4a262a82c911
+    organizationId: 76775539-7ff9-4f1a-a0f2-4a262a82c911
 
 inputs:
   properties:
     projectId:
       type: string
       description: Scaleway Project ID to inventory.
-    region:
+    organizationId:
       type: string
-      default: fr-par
-      description: Region for region-scoped services (fr-par, nl-ams, pl-waw).
-    zone:
-      type: string
-      default: fr-par-1
-      description: Availability zone for zone-scoped services (e.g. fr-par-1).
-  required: ["projectId"]
+      description: Organization ID, for the org-scoped steps (projects, IAM apps).
+    regions:
+      type: array
+      items:
+        type: string
+      default: ["fr-par", "nl-ams", "pl-waw"]
+      description: Regions to sweep for region-scoped services.
+    zones:
+      type: array
+      items:
+        type: string
+      default: ["fr-par-1", "fr-par-2", "fr-par-3", "nl-ams-1", "nl-ams-2", "nl-ams-3", "pl-waw-1", "pl-waw-2", "pl-waw-3"]
+      description: Availability zones to sweep for zone-scoped services.
+  required: ["projectId", "organizationId"]
 
 jobs:
-  - name: region-scoped
-    description: Inventory services whose API is scoped by region.
-    # Politeness cap on concurrent Scaleway API calls.
-    concurrency: 4
+  - name: global-scoped
+    description: Services with no region or zone dimension.
+    concurrency: 3
     dependsOn: []
     weight: 0
     steps:
-      - name: list-vpcs
-        description: Discover every VPC in the region.
+      - name: list-dns-zones
+        description: Discover every DNS zone in the project (global API).
+        task:
+          type: model_method
+          modelType: "@sntxrr/scaleway-dns"
+          modelName: inv-dns
+          methodName: list-zones
+          inputs:
+            secretKey: ${{ vault.get(scaleway, SCW_SECRET_KEY) }}
+            projectId: ${{ inputs.projectId }}
+        dependsOn: []
+        weight: 0
+        allowFailure: true
+
+      - name: list-projects
+        description: Discover every project in the organization.
+        task:
+          type: model_method
+          modelType: "@sntxrr/scaleway-account"
+          modelName: inv-account
+          methodName: list
+          inputs:
+            secretKey: ${{ vault.get(scaleway, SCW_SECRET_KEY) }}
+            organizationId: ${{ inputs.organizationId }}
+        dependsOn: []
+        weight: 0
+        allowFailure: true
+
+      - name: list-iam-applications
+        description: Discover every IAM application in the organization.
+        task:
+          type: model_method
+          modelType: "@sntxrr/scaleway-iam"
+          modelName: inv-iam
+          methodName: list
+          inputs:
+            secretKey: ${{ vault.get(scaleway, SCW_SECRET_KEY) }}
+            organizationId: ${{ inputs.organizationId }}
+        dependsOn: []
+        weight: 0
+        allowFailure: true
+
+  - name: region-scoped
+    description: Services scoped by region, swept across every input region.
+    # Politeness cap on concurrent Scaleway API calls.
+    concurrency: 6
+    dependsOn: []
+    weight: 0
+    steps:
+      - name: list-vpcs-${{ self.region }}
+        description: Discover every vpcs in ${{ self.region }}.
+        forEach:
+          item: region
+          in: ${{ inputs.regions }}
         task:
           type: model_method
           modelType: "@sntxrr/scaleway-vpc"
@@ -58,13 +117,19 @@ jobs:
           inputs:
             secretKey: ${{ vault.get(scaleway, SCW_SECRET_KEY) }}
             projectId: ${{ inputs.projectId }}
-            region: ${{ inputs.region }}
+            region: ${{ self.region }}
+          dataOutputOverrides:
+            - specName: vpc
+              vary:
+                - region
         dependsOn: []
         weight: 0
         allowFailure: true
-
-      - name: list-ips
-        description: Discover every IPAM-managed IP address in the region.
+      - name: list-ips-${{ self.region }}
+        description: Discover every ips in ${{ self.region }}.
+        forEach:
+          item: region
+          in: ${{ inputs.regions }}
         task:
           type: model_method
           modelType: "@sntxrr/scaleway-ipam"
@@ -73,13 +138,19 @@ jobs:
           inputs:
             secretKey: ${{ vault.get(scaleway, SCW_SECRET_KEY) }}
             projectId: ${{ inputs.projectId }}
-            region: ${{ inputs.region }}
+            region: ${{ self.region }}
+          dataOutputOverrides:
+            - specName: ip
+              vary:
+                - region
         dependsOn: []
         weight: 0
         allowFailure: true
-
-      - name: list-databases
-        description: Discover every managed RDB instance in the region.
+      - name: list-databases-${{ self.region }}
+        description: Discover every databases in ${{ self.region }}.
+        forEach:
+          item: region
+          in: ${{ inputs.regions }}
         task:
           type: model_method
           modelType: "@sntxrr/scaleway-rdb"
@@ -88,13 +159,19 @@ jobs:
           inputs:
             secretKey: ${{ vault.get(scaleway, SCW_SECRET_KEY) }}
             projectId: ${{ inputs.projectId }}
-            region: ${{ inputs.region }}
+            region: ${{ self.region }}
+          dataOutputOverrides:
+            - specName: instance
+              vary:
+                - region
         dependsOn: []
         weight: 0
         allowFailure: true
-
-      - name: list-registry-namespaces
-        description: Discover every Container Registry namespace in the region.
+      - name: list-registry-namespaces-${{ self.region }}
+        description: Discover every registry namespaces in ${{ self.region }}.
+        forEach:
+          item: region
+          in: ${{ inputs.regions }}
         task:
           type: model_method
           modelType: "@sntxrr/scaleway-registry"
@@ -103,15 +180,19 @@ jobs:
           inputs:
             secretKey: ${{ vault.get(scaleway, SCW_SECRET_KEY) }}
             projectId: ${{ inputs.projectId }}
-            region: ${{ inputs.region }}
+            region: ${{ self.region }}
+          dataOutputOverrides:
+            - specName: namespace
+              vary:
+                - region
         dependsOn: []
         weight: 0
         allowFailure: true
-
-      - name: list-secrets
-        description: >-
-          Discover every Secret Manager secret in the region. Metadata only —
-          secret values are never fetched or snapshotted.
+      - name: list-secrets-${{ self.region }}
+        description: Discover every secrets in ${{ self.region }}.
+        forEach:
+          item: region
+          in: ${{ inputs.regions }}
         task:
           type: model_method
           modelType: "@sntxrr/scaleway-secret-manager"
@@ -120,13 +201,19 @@ jobs:
           inputs:
             secretKey: ${{ vault.get(scaleway, SCW_SECRET_KEY) }}
             projectId: ${{ inputs.projectId }}
-            region: ${{ inputs.region }}
+            region: ${{ self.region }}
+          dataOutputOverrides:
+            - specName: secret
+              vary:
+                - region
         dependsOn: []
         weight: 0
         allowFailure: true
-
-      - name: list-containers
-        description: Discover every Serverless Container in the region.
+      - name: list-containers-${{ self.region }}
+        description: Discover every containers in ${{ self.region }}.
+        forEach:
+          item: region
+          in: ${{ inputs.regions }}
         task:
           type: model_method
           modelType: "@sntxrr/scaleway-serverless-containers"
@@ -135,13 +222,61 @@ jobs:
           inputs:
             secretKey: ${{ vault.get(scaleway, SCW_SECRET_KEY) }}
             projectId: ${{ inputs.projectId }}
-            region: ${{ inputs.region }}
+            region: ${{ self.region }}
+          dataOutputOverrides:
+            - specName: container
+              vary:
+                - region
         dependsOn: []
         weight: 0
         allowFailure: true
-
-      - name: list-kapsule-clusters
-        description: Discover every Kubernetes Kapsule cluster in the region.
+      - name: list-functions-${{ self.region }}
+        description: Discover every functions in ${{ self.region }}.
+        forEach:
+          item: region
+          in: ${{ inputs.regions }}
+        task:
+          type: model_method
+          modelType: "@sntxrr/scaleway-serverless-functions"
+          modelName: inv-serverless-functions
+          methodName: list
+          inputs:
+            secretKey: ${{ vault.get(scaleway, SCW_SECRET_KEY) }}
+            projectId: ${{ inputs.projectId }}
+            region: ${{ self.region }}
+          dataOutputOverrides:
+            - specName: function
+              vary:
+                - region
+        dependsOn: []
+        weight: 0
+        allowFailure: true
+      - name: list-jobs-${{ self.region }}
+        description: Discover every jobs in ${{ self.region }}.
+        forEach:
+          item: region
+          in: ${{ inputs.regions }}
+        task:
+          type: model_method
+          modelType: "@sntxrr/scaleway-serverless-jobs"
+          modelName: inv-serverless-jobs
+          methodName: list
+          inputs:
+            secretKey: ${{ vault.get(scaleway, SCW_SECRET_KEY) }}
+            projectId: ${{ inputs.projectId }}
+            region: ${{ self.region }}
+          dataOutputOverrides:
+            - specName: job-definition
+              vary:
+                - region
+        dependsOn: []
+        weight: 0
+        allowFailure: true
+      - name: list-kapsule-clusters-${{ self.region }}
+        description: Discover every kapsule clusters in ${{ self.region }}.
+        forEach:
+          item: region
+          in: ${{ inputs.regions }}
         task:
           type: model_method
           modelType: "@sntxrr/scaleway-kapsule"
@@ -150,19 +285,187 @@ jobs:
           inputs:
             secretKey: ${{ vault.get(scaleway, SCW_SECRET_KEY) }}
             projectId: ${{ inputs.projectId }}
-            region: ${{ inputs.region }}
+            region: ${{ self.region }}
+          dataOutputOverrides:
+            - specName: cluster
+              vary:
+                - region
+        dependsOn: []
+        weight: 0
+        allowFailure: true
+      - name: list-email-domains-${{ self.region }}
+        description: Discover every email domains in ${{ self.region }}.
+        forEach:
+          item: region
+          in: ${{ inputs.regions }}
+        task:
+          type: model_method
+          modelType: "@sntxrr/scaleway-tem"
+          modelName: inv-tem
+          methodName: list
+          inputs:
+            secretKey: ${{ vault.get(scaleway, SCW_SECRET_KEY) }}
+            projectId: ${{ inputs.projectId }}
+            region: ${{ self.region }}
+          dataOutputOverrides:
+            - specName: domain
+              vary:
+                - region
+        dependsOn: []
+        weight: 0
+        allowFailure: true
+      - name: list-filesystems-${{ self.region }}
+        description: Discover every filesystems in ${{ self.region }}.
+        forEach:
+          item: region
+          in: ${{ inputs.regions }}
+        task:
+          type: model_method
+          modelType: "@sntxrr/scaleway-file-storage"
+          modelName: inv-file-storage
+          methodName: list
+          inputs:
+            secretKey: ${{ vault.get(scaleway, SCW_SECRET_KEY) }}
+            projectId: ${{ inputs.projectId }}
+            region: ${{ self.region }}
+          dataOutputOverrides:
+            - specName: filesystem
+              vary:
+                - region
+        dependsOn: []
+        weight: 0
+        allowFailure: true
+      - name: list-inference-deployments-${{ self.region }}
+        description: Discover every inference deployments in ${{ self.region }}.
+        forEach:
+          item: region
+          in: ${{ inputs.regions }}
+        task:
+          type: model_method
+          modelType: "@sntxrr/scaleway-inference"
+          modelName: inv-inference
+          methodName: list
+          inputs:
+            secretKey: ${{ vault.get(scaleway, SCW_SECRET_KEY) }}
+            projectId: ${{ inputs.projectId }}
+            region: ${{ self.region }}
+          dataOutputOverrides:
+            - specName: deployment
+              vary:
+                - region
+        dependsOn: []
+        weight: 0
+        allowFailure: true
+      - name: list-nats-accounts-${{ self.region }}
+        description: Discover every nats accounts in ${{ self.region }}.
+        forEach:
+          item: region
+          in: ${{ inputs.regions }}
+        task:
+          type: model_method
+          modelType: "@sntxrr/scaleway-messaging"
+          modelName: inv-messaging
+          methodName: list
+          inputs:
+            secretKey: ${{ vault.get(scaleway, SCW_SECRET_KEY) }}
+            projectId: ${{ inputs.projectId }}
+            region: ${{ self.region }}
+          dataOutputOverrides:
+            - specName: nats-account
+              vary:
+                - region
+        dependsOn: []
+        weight: 0
+        allowFailure: true
+      - name: list-mongodb-instances-${{ self.region }}
+        description: Discover every mongodb instances in ${{ self.region }}.
+        forEach:
+          item: region
+          in: ${{ inputs.regions }}
+        task:
+          type: model_method
+          modelType: "@sntxrr/scaleway-mongodb"
+          modelName: inv-mongodb
+          methodName: list
+          inputs:
+            secretKey: ${{ vault.get(scaleway, SCW_SECRET_KEY) }}
+            projectId: ${{ inputs.projectId }}
+            region: ${{ self.region }}
+          dataOutputOverrides:
+            - specName: instance
+              vary:
+                - region
+        dependsOn: []
+        weight: 0
+        allowFailure: true
+      - name: list-kms-keys-${{ self.region }}
+        description: Discover every kms keys in ${{ self.region }}.
+        forEach:
+          item: region
+          in: ${{ inputs.regions }}
+        task:
+          type: model_method
+          modelType: "@sntxrr/scaleway-key-manager"
+          modelName: inv-key-manager
+          methodName: list
+          inputs:
+            secretKey: ${{ vault.get(scaleway, SCW_SECRET_KEY) }}
+            projectId: ${{ inputs.projectId }}
+            region: ${{ self.region }}
+          dataOutputOverrides:
+            - specName: key
+              vary:
+                - region
+        dependsOn: []
+        weight: 0
+        allowFailure: true
+      - name: list-cockpit-data-sources-${{ self.region }}
+        description: Discover every cockpit data sources in ${{ self.region }}.
+        forEach:
+          item: region
+          in: ${{ inputs.regions }}
+        task:
+          type: model_method
+          modelType: "@sntxrr/scaleway-cockpit"
+          modelName: inv-cockpit
+          methodName: list
+          inputs:
+            secretKey: ${{ vault.get(scaleway, SCW_SECRET_KEY) }}
+            projectId: ${{ inputs.projectId }}
+            region: ${{ self.region }}
+          dataOutputOverrides:
+            - specName: data-source
+              vary:
+                - region
+        dependsOn: []
+        weight: 0
+        allowFailure: true
+      - name: list-webhostings
+        description: Discover every Web Hosting instance (fr-par only).
+        task:
+          type: model_method
+          modelType: "@sntxrr/scaleway-webhosting"
+          modelName: inv-webhosting
+          methodName: list
+          inputs:
+            secretKey: ${{ vault.get(scaleway, SCW_SECRET_KEY) }}
+            projectId: ${{ inputs.projectId }}
+            region: fr-par
         dependsOn: []
         weight: 0
         allowFailure: true
 
   - name: zone-scoped
-    description: Inventory services whose API is scoped by availability zone.
-    concurrency: 4
+    description: Services scoped by availability zone, swept across every input zone.
+    concurrency: 6
     dependsOn: []
     weight: 0
     steps:
-      - name: list-servers
-        description: Discover every Instance server in the zone.
+      - name: list-servers-${{ self.zone }}
+        description: Discover every servers in ${{ self.zone }}.
+        forEach:
+          item: zone
+          in: ${{ inputs.zones }}
         task:
           type: model_method
           modelType: "@sntxrr/scaleway-instance"
@@ -171,13 +474,19 @@ jobs:
           inputs:
             secretKey: ${{ vault.get(scaleway, SCW_SECRET_KEY) }}
             projectId: ${{ inputs.projectId }}
-            zone: ${{ inputs.zone }}
+            zone: ${{ self.zone }}
+          dataOutputOverrides:
+            - specName: server
+              vary:
+                - zone
         dependsOn: []
         weight: 0
         allowFailure: true
-
-      - name: list-volumes
-        description: Discover every Block Storage volume in the zone.
+      - name: list-volumes-${{ self.zone }}
+        description: Discover every volumes in ${{ self.zone }}.
+        forEach:
+          item: zone
+          in: ${{ inputs.zones }}
         task:
           type: model_method
           modelType: "@sntxrr/scaleway-block-storage"
@@ -186,13 +495,19 @@ jobs:
           inputs:
             secretKey: ${{ vault.get(scaleway, SCW_SECRET_KEY) }}
             projectId: ${{ inputs.projectId }}
-            zone: ${{ inputs.zone }}
+            zone: ${{ self.zone }}
+          dataOutputOverrides:
+            - specName: volume
+              vary:
+                - zone
         dependsOn: []
         weight: 0
         allowFailure: true
-
-      - name: list-gateways
-        description: Discover every Public Gateway in the zone.
+      - name: list-gateways-${{ self.zone }}
+        description: Discover every gateways in ${{ self.zone }}.
+        forEach:
+          item: zone
+          in: ${{ inputs.zones }}
         task:
           type: model_method
           modelType: "@sntxrr/scaleway-public-gateway"
@@ -201,13 +516,19 @@ jobs:
           inputs:
             secretKey: ${{ vault.get(scaleway, SCW_SECRET_KEY) }}
             projectId: ${{ inputs.projectId }}
-            zone: ${{ inputs.zone }}
+            zone: ${{ self.zone }}
+          dataOutputOverrides:
+            - specName: gateway
+              vary:
+                - zone
         dependsOn: []
         weight: 0
         allowFailure: true
-
-      - name: list-load-balancers
-        description: Discover every Load Balancer in the zone.
+      - name: list-load-balancers-${{ self.zone }}
+        description: Discover every load balancers in ${{ self.zone }}.
+        forEach:
+          item: zone
+          in: ${{ inputs.zones }}
         task:
           type: model_method
           modelType: "@sntxrr/scaleway-load-balancer"
@@ -216,13 +537,19 @@ jobs:
           inputs:
             secretKey: ${{ vault.get(scaleway, SCW_SECRET_KEY) }}
             projectId: ${{ inputs.projectId }}
-            zone: ${{ inputs.zone }}
+            zone: ${{ self.zone }}
+          dataOutputOverrides:
+            - specName: loadBalancer
+              vary:
+                - zone
         dependsOn: []
         weight: 0
         allowFailure: true
-
-      - name: list-redis-clusters
-        description: Discover every Redis cluster in the zone.
+      - name: list-redis-clusters-${{ self.zone }}
+        description: Discover every redis clusters in ${{ self.zone }}.
+        forEach:
+          item: zone
+          in: ${{ inputs.zones }}
         task:
           type: model_method
           modelType: "@sntxrr/scaleway-redis"
@@ -231,7 +558,53 @@ jobs:
           inputs:
             secretKey: ${{ vault.get(scaleway, SCW_SECRET_KEY) }}
             projectId: ${{ inputs.projectId }}
-            zone: ${{ inputs.zone }}
+            zone: ${{ self.zone }}
+          dataOutputOverrides:
+            - specName: cluster
+              vary:
+                - zone
+        dependsOn: []
+        weight: 0
+        allowFailure: true
+      - name: list-elastic-metal-servers-${{ self.zone }}
+        description: Discover every elastic metal servers in ${{ self.zone }}.
+        forEach:
+          item: zone
+          in: ${{ inputs.zones }}
+        task:
+          type: model_method
+          modelType: "@sntxrr/scaleway-elastic-metal"
+          modelName: inv-elastic-metal
+          methodName: list
+          inputs:
+            secretKey: ${{ vault.get(scaleway, SCW_SECRET_KEY) }}
+            projectId: ${{ inputs.projectId }}
+            zone: ${{ self.zone }}
+          dataOutputOverrides:
+            - specName: server
+              vary:
+                - zone
+        dependsOn: []
+        weight: 0
+        allowFailure: true
+      - name: list-apple-silicon-servers-${{ self.zone }}
+        description: Discover every apple silicon servers in ${{ self.zone }}.
+        forEach:
+          item: zone
+          in: ${{ inputs.zones }}
+        task:
+          type: model_method
+          modelType: "@sntxrr/scaleway-apple-silicon"
+          modelName: inv-apple-silicon
+          methodName: list
+          inputs:
+            secretKey: ${{ vault.get(scaleway, SCW_SECRET_KEY) }}
+            projectId: ${{ inputs.projectId }}
+            zone: ${{ self.zone }}
+          dataOutputOverrides:
+            - specName: server
+              vary:
+                - zone
         dependsOn: []
         weight: 0
         allowFailure: true

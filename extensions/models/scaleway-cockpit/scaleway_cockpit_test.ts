@@ -319,3 +319,34 @@ for (const method of ["sync", "delete"] as const) {
     assertEquals(writes.length, 0);
   });
 }
+
+// --- Regression: Cockpit's list endpoints require project_id ---------------
+// Omitting it returns 400 {"argument_name":"project_id","reason":"format"}.
+// Caught live by the fleet-inventory sweep, which failed in all three regions.
+
+for (
+  const [method, key] of [
+    ["list", "data_sources"],
+    ["list-tokens", "tokens"],
+  ] as const
+) {
+  Deno.test(`${method} sends project_id as a query param`, async () => {
+    const { ctx } = makeContext();
+    const seen: string[] = [];
+    await withMockedFetch(
+      (url) => {
+        seen.push(url);
+        return new Response(
+          JSON.stringify({ [key]: [], total_count: 0 }),
+          { status: 200 },
+        );
+      },
+      () => model.methods[method].execute({}, ctx),
+    );
+    assert(seen.length > 0, "expected at least one request");
+    const q = new URL(seen[0]).searchParams;
+    assertEquals(q.get("project_id"), G.projectId);
+    // Pagination must still be present alongside the new param.
+    assertEquals(q.get("page"), "1");
+  });
+}

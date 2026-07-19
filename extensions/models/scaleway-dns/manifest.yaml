@@ -1,7 +1,7 @@
 manifestVersion: 1
 
 name: "@sntxrr/scaleway-dns"
-version: "2026.07.19.1"
+version: "2026.07.19.2"
 description: "Manage a Scaleway DNS zone — create/delete the zone, sync records, list zones, and update (apply add/set/delete/clear record changes), via the global Domains & DNS API (/domain/v2beta1) with X-Auth-Token auth."
 repository: "https://github.com/sntxrr/swamp-scaleway"
 
