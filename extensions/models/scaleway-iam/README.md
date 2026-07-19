@@ -15,15 +15,15 @@ Authenticated with the `X-Auth-Token` header (secret key wired from a vault).
 
 ## Methods
 
-| Method          | What it does                                                                                          |
-| --------------- | ---------------------------------------------------------------------------------------------------- |
-| `sync`          | Fetch the managed application's current state (`GetApplication`) and store a snapshot                 |
-| `create`        | Provision a new IAM application (`CreateApplication`, POST) and snapshot it under its new ID          |
-| `update`        | Mutate the application's mutable fields (`UpdateApplication`, PATCH) and re-snapshot                  |
-| `delete`        | Deprovision the application (`DeleteApplication`) — idempotent (a `404` is treated as already gone)   |
-| `list`          | Factory discovery — snapshot every IAM application in the Organization (paginated)                    |
+| Method          | What it does                                                                                                         |
+| --------------- | -------------------------------------------------------------------------------------------------------------------- |
+| `sync`          | Fetch the managed application's current state (`GetApplication`) and store a snapshot                                |
+| `create`        | Provision a new IAM application (`CreateApplication`, POST) and snapshot it under its new ID                         |
+| `update`        | Mutate the application's mutable fields (`UpdateApplication`, PATCH) and re-snapshot                                 |
+| `delete`        | Deprovision the application (`DeleteApplication`) — idempotent (a `404` is treated as already gone)                  |
+| `list`          | Factory discovery — snapshot every IAM application in the Organization (paginated)                                   |
 | `list-api-keys` | Factory discovery — snapshot **API-key metadata** for the managed application (paginated). Never stores `secret_key` |
-| `list-policies` | Factory discovery — snapshot every IAM policy in the Organization (paginated)                         |
+| `list-policies` | Factory discovery — snapshot every IAM policy in the Organization (paginated)                                        |
 
 The mutating verbs (`create`/`update`/`delete`) auto-run the labeled
 `org-specified` pre-flight check, which fails fast if `organizationId` is empty.
@@ -31,10 +31,10 @@ The mutating verbs (`create`/`update`/`delete`) auto-run the labeled
 ## Secret hygiene
 
 Creating an IAM API key returns its `secret_key` **exactly once**. This model
-**never** writes any `secret_key` into a resource snapshot or log. `list-api-keys`
-snapshots API-key **metadata only** (the non-secret `access_key` plus surrounding
-fields); the mapper explicitly omits `secret_key`, so even an API response that
-echoes a secret cannot leak it into a snapshot.
+**never** writes any `secret_key` into a resource snapshot or log.
+`list-api-keys` snapshots API-key **metadata only** (the non-secret `access_key`
+plus surrounding fields); the mapper explicitly omits `secret_key`, so even an
+API response that echoes a secret cannot leak it into a snapshot.
 
 ## Setup
 
@@ -76,12 +76,12 @@ first.
 
 ## Global arguments
 
-| Arg              | Required | Default                    | Description                                              |
-| ---------------- | -------- | -------------------------- | -------------------------------------------------------- |
-| `secretKey`      | yes      | —                          | Scaleway API secret key (sensitive; wire from a vault)   |
-| `organizationId` | yes      | —                          | Organization ID that owns the application/keys/policies  |
-| `applicationId`  | yes      | —                          | IAM application ID this model manages                    |
-| `endpoint`       | no       | `https://api.scaleway.com` | Override the API host                                    |
+| Arg              | Required    | Default                    | Description                                                                                          |
+| ---------------- | ----------- | -------------------------- | ---------------------------------------------------------------------------------------------------- |
+| `secretKey`      | yes         | —                          | Scaleway API secret key (sensitive; wire from a vault)                                               |
+| `organizationId` | yes         | —                          | Organization ID that owns the application/keys/policies                                              |
+| `applicationId`  | conditional | —                          | IAM application ID this model manages. Required by every method except `create`, which provisions it |
+| `endpoint`       | no          | `https://api.scaleway.com` | Override the API host                                                                                |
 
 > No `zone`/`region` argument — the IAM API is global. Scope is the
 > **Organization**, not a project.

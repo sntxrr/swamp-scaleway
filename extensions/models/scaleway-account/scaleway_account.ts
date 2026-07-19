@@ -29,8 +29,10 @@ const GlobalArgsSchema = z.object({
   organizationId: z.string().describe(
     "Scaleway Organization ID that owns the Project (used to create and to list).",
   ),
-  projectId: z.string().describe(
-    "ID of the Account Project this model manages.",
+  projectId: z.string().optional().describe(
+    "ID of the Account Project this model manages. Optional — `create` " +
+      "provisions a new Project and returns its ID; every other method " +
+      "requires it.",
   ),
   endpoint: z.string().optional().describe(
     "Override the API host. Defaults to https://api.scaleway.com.",
@@ -176,7 +178,10 @@ function toProjectResource(
   observedAt: string,
 ): Record<string, unknown> {
   return {
-    id: (p.id as string) ?? g.projectId,
+    // Callers always supply an id: API responses carry one, and the delete
+    // path passes the guarded projectId. The final "" is unreachable defensive
+    // padding so the snapshot still satisfies ProjectSchema's required id.
+    id: (p.id as string) ?? g.projectId ?? "",
     name: (p.name as string) ?? null,
     description: (p.description as string) ?? null,
     organizationId: (p.organization_id as string) ?? g.organizationId,
@@ -191,11 +196,31 @@ function toProjectResource(
 /** Account Projects collection path (global scope). */
 const projectsPath = (): string => `/account/v3/projects`;
 
+/**
+ * Resolve the managed Project ID for methods that act on an *existing* Project.
+ *
+ * `projectId` is optional in the global schema because `create` provisions the
+ * Project (scoped by the always-required `organizationId`) and learns its ID
+ * from the API — requiring it up front would force callers to pass a throwaway
+ * placeholder just to satisfy validation. Methods that read or mutate an
+ * existing Project call this to fail fast with an actionable message.
+ */
+function requireProjectId(g: GlobalArgs, method: string): string {
+  if (!g.projectId) {
+    throw new Error(
+      `The "${method}" method requires globalArgs.projectId — the ID of an ` +
+        `existing Account Project. Set projectId on the model, or run ` +
+        `"create" first to provision one.`,
+    );
+  }
+  return g.projectId;
+}
+
 // --- Model -----------------------------------------------------------------
 /** Scaleway Account model — one instance per Project, keyed by projectId. */
 export const model = {
   type: "@sntxrr/scaleway-account",
-  version: "2026.07.18.1",
+  version: "2026.07.19.1",
   globalArguments: GlobalArgsSchema,
   resources: {
     "project": {
@@ -235,18 +260,19 @@ export const model = {
         context: ExecuteContext,
       ): Promise<{ dataHandles: Array<{ name: string }> }> => {
         const { globalArgs: g, logger } = context;
-        logger.info("Syncing Scaleway Project {id}", { id: g.projectId });
+        const projectId = requireProjectId(g, "sync");
+        logger.info("Syncing Scaleway Project {id}", { id: projectId });
         const res = await scalewayFetch<Record<string, unknown>>(
           g,
           "GET",
-          `${projectsPath()}/${encodeURIComponent(g.projectId)}`,
+          `${projectsPath()}/${encodeURIComponent(projectId)}`,
         );
         const handle = await context.writeResource(
           "project",
-          g.projectId,
+          projectId,
           toProjectResource(res, g, new Date().toISOString()),
         );
-        logger.info("Synced Scaleway Project {id}", { id: g.projectId });
+        logger.info("Synced Scaleway Project {id}", { id: projectId });
         return { dataHandles: [handle] };
       },
     },
@@ -274,7 +300,10 @@ export const model = {
           projectsPath(),
           body,
         );
-        const newId = (res.id as string) ?? g.projectId;
+        // CreateProject always returns the new ID; fall back to a preset
+        // projectId only if the caller pinned one, so create never depends on
+        // it being set.
+        const newId = (res.id as string) ?? g.projectId ?? "";
         const handle = await context.writeResource(
           "project",
           newId,
@@ -293,22 +322,23 @@ export const model = {
         context: ExecuteContext,
       ): Promise<{ dataHandles: Array<{ name: string }> }> => {
         const { globalArgs: g, logger } = context;
-        logger.info("Updating Scaleway Project {id}", { id: g.projectId });
+        const projectId = requireProjectId(g, "update");
+        logger.info("Updating Scaleway Project {id}", { id: projectId });
         const body: Record<string, unknown> = {};
         if (args.name !== undefined) body.name = args.name;
         if (args.description !== undefined) body.description = args.description;
         const res = await scalewayFetch<Record<string, unknown>>(
           g,
           "PATCH",
-          `${projectsPath()}/${encodeURIComponent(g.projectId)}`,
+          `${projectsPath()}/${encodeURIComponent(projectId)}`,
           body,
         );
         const handle = await context.writeResource(
           "project",
-          g.projectId,
+          projectId,
           toProjectResource(res, g, new Date().toISOString()),
         );
-        logger.info("Updated Scaleway Project {id}", { id: g.projectId });
+        logger.info("Updated Scaleway Project {id}", { id: projectId });
         return { dataHandles: [handle] };
       },
     },
@@ -320,7 +350,8 @@ export const model = {
         context: ExecuteContext,
       ): Promise<{ dataHandles: Array<{ name: string }> }> => {
         const { globalArgs: g, logger } = context;
-        logger.info("Deleting Scaleway Project {id}", { id: g.projectId });
+        const projectId = requireProjectId(g, "delete");
+        logger.info("Deleting Scaleway Project {id}", { id: projectId });
         // Idempotent delete: a 404 means the Project is already gone — treat it
         // as success and record an absent snapshot (CONVENTIONS.md §3.2).
         let res: Record<string, unknown> | undefined;
@@ -329,7 +360,7 @@ export const model = {
           res = await scalewayFetch<Record<string, unknown>>(
             g,
             "DELETE",
-            `${projectsPath()}/${encodeURIComponent(g.projectId)}`,
+            `${projectsPath()}/${encodeURIComponent(projectId)}`,
           );
         } catch (e) {
           if ((e as { status?: number }).status !== 404) throw e;
@@ -338,22 +369,22 @@ export const model = {
         const observedAt = new Date().toISOString();
         const snapshot = absent
           ? toProjectResource(
-            { id: g.projectId, status: "absent" },
+            { id: projectId, status: "absent" },
             g,
             observedAt,
           )
           : toProjectResource(
-            res ?? { id: g.projectId, status: "absent" },
+            res ?? { id: projectId, status: "absent" },
             g,
             observedAt,
           );
         const handle = await context.writeResource(
           "project",
-          g.projectId,
+          projectId,
           snapshot,
         );
         logger.info("Deleted Scaleway Project {id} (absent={absent})", {
-          id: g.projectId,
+          id: projectId,
           absent,
         });
         return { dataHandles: [handle] };

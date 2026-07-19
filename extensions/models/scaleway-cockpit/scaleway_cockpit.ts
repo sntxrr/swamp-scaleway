@@ -30,8 +30,10 @@ const GlobalArgsSchema = z.object({
   region: z.string().default("fr-par").describe(
     "Region, e.g. fr-par, nl-ams, pl-waw.",
   ),
-  dataSourceId: z.string().describe(
-    "ID of the Cockpit data source this model manages.",
+  dataSourceId: z.string().optional().describe(
+    "ID of the Cockpit data source this model manages. Optional — `create` " +
+      "provisions a new data source and returns its ID; every other method " +
+      "requires it.",
   ),
   endpoint: z.string().optional().describe(
     "Override the API host. Defaults to https://api.scaleway.com.",
@@ -211,7 +213,11 @@ function toDataSourceResource(
   observedAt: string,
 ): Record<string, unknown> {
   return {
-    id: (d.id as string) ?? g.dataSourceId,
+    // Callers always supply an id: API responses carry one, and the delete
+    // path passes the guarded dataSourceId. The final "" is unreachable
+    // defensive padding so the snapshot still satisfies DataSourceSchema's
+    // required id.
+    id: (d.id as string) ?? g.dataSourceId ?? "",
     name: (d.name as string) ?? null,
     type: (d.type as string) ?? null,
     url: (d.url as string) ?? null,
@@ -253,11 +259,32 @@ const dataSourcesPath = (g: GlobalArgs): string =>
 const tokensPath = (g: GlobalArgs): string =>
   `/cockpit/v1/regions/${g.region}/tokens`;
 
+/**
+ * Resolve the managed data source ID for methods that act on an *existing*
+ * data source.
+ *
+ * `dataSourceId` is optional in the global schema because `create` provisions
+ * the data source and learns its ID from the API — requiring it up front would
+ * force callers to pass a throwaway placeholder just to satisfy validation.
+ * Methods that read or mutate an existing data source call this to fail fast
+ * with an actionable message.
+ */
+function requireDataSourceId(g: GlobalArgs, method: string): string {
+  if (!g.dataSourceId) {
+    throw new Error(
+      `The "${method}" method requires globalArgs.dataSourceId — the ID of an ` +
+        `existing Cockpit data source. Set dataSourceId on the model, or run ` +
+        `"create" first to provision one.`,
+    );
+  }
+  return g.dataSourceId;
+}
+
 // --- Model -----------------------------------------------------------------
 /** Scaleway Cockpit model — one instance per data source, keyed by dataSourceId. */
 export const model = {
   type: "@sntxrr/scaleway-cockpit",
-  version: "2026.07.18.2",
+  version: "2026.07.19.1",
   globalArguments: GlobalArgsSchema,
   resources: {
     "data-source": {
@@ -307,21 +334,22 @@ export const model = {
         context: ExecuteContext,
       ): Promise<{ dataHandles: Array<{ name: string }> }> => {
         const { globalArgs: g, logger } = context;
+        const dataSourceId = requireDataSourceId(g, "sync");
         logger.info("Syncing Scaleway Cockpit data source {id}", {
-          id: g.dataSourceId,
+          id: dataSourceId,
         });
         const res = await scalewayFetch<Record<string, unknown>>(
           g,
           "GET",
-          `${dataSourcesPath(g)}/${encodeURIComponent(g.dataSourceId)}`,
+          `${dataSourcesPath(g)}/${encodeURIComponent(dataSourceId)}`,
         );
         const handle = await context.writeResource(
           "data-source",
-          g.dataSourceId,
+          dataSourceId,
           toDataSourceResource(res, g, new Date().toISOString()),
         );
         logger.info("Synced Scaleway Cockpit data source {id}", {
-          id: g.dataSourceId,
+          id: dataSourceId,
         });
         return { dataHandles: [handle] };
       },
@@ -356,7 +384,10 @@ export const model = {
           dataSourcesPath(g),
           body,
         );
-        const newId = (res.id as string) ?? g.dataSourceId;
+        // CreateDataSource always returns the new ID; fall back to a preset
+        // dataSourceId only if the caller pinned one, so create never depends
+        // on it being set.
+        const newId = (res.id as string) ?? g.dataSourceId ?? "";
         const handle = await context.writeResource(
           "data-source",
           newId,
@@ -377,8 +408,9 @@ export const model = {
         context: ExecuteContext,
       ): Promise<{ dataHandles: Array<{ name: string }> }> => {
         const { globalArgs: g, logger } = context;
+        const dataSourceId = requireDataSourceId(g, "delete");
         logger.info("Deleting Scaleway Cockpit data source {id}", {
-          id: g.dataSourceId,
+          id: dataSourceId,
         });
         // Idempotent delete: a 404 means the data source is already gone —
         // treat it as success and record an absent snapshot (CONVENTIONS.md §3.2).
@@ -388,7 +420,7 @@ export const model = {
           res = await scalewayFetch<Record<string, unknown>>(
             g,
             "DELETE",
-            `${dataSourcesPath(g)}/${encodeURIComponent(g.dataSourceId)}`,
+            `${dataSourcesPath(g)}/${encodeURIComponent(dataSourceId)}`,
           );
         } catch (e) {
           if ((e as { status?: number }).status !== 404) throw e;
@@ -399,17 +431,17 @@ export const model = {
         // resource was already absent (404) — mark the snapshot absent in both
         // cases so the two paths are symmetric.
         const snapshot = {
-          ...toDataSourceResource(res ?? { id: g.dataSourceId }, g, observedAt),
+          ...toDataSourceResource(res ?? { id: dataSourceId }, g, observedAt),
           absent: true,
         };
         const handle = await context.writeResource(
           "data-source",
-          g.dataSourceId,
+          dataSourceId,
           snapshot,
         );
         logger.info(
           "Deleted Scaleway Cockpit data source {id} (absent={absent})",
-          { id: g.dataSourceId, absent },
+          { id: dataSourceId, absent },
         );
         return { dataHandles: [handle] };
       },

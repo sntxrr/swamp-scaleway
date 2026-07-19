@@ -1,15 +1,16 @@
 # @sntxrr/scaleway-ipam
 
 A [swamp](https://swamp-club.com) model for a **Scaleway IPAM (IP Address
-Management) IP** — one model instance per managed IP address, keyed by its IP ID.
-Wraps the [Scaleway IPAM API](https://www.scaleway.com/en/developers/api/ipam/)
-(`/ipam/v1`, regional) using only Deno's built-in `fetch` — no SDK. Authenticated
-with the `X-Auth-Token` header (secret key wired from a vault).
+Management) IP** — one model instance per managed IP address, keyed by its IP
+ID. Wraps the
+[Scaleway IPAM API](https://www.scaleway.com/en/developers/api/ipam/)
+(`/ipam/v1`, regional) using only Deno's built-in `fetch` — no SDK.
+Authenticated with the `X-Auth-Token` header (secret key wired from a vault).
 
 ## Methods
 
 | Method   | What it does                                                            |
-| -------- | ---------------------------------------------------------------------- |
+| -------- | ----------------------------------------------------------------------- |
 | `sync`   | Fetch the IP's current state (`GetIP`) and store a snapshot             |
 | `create` | Book (reserve) a new IP address (`BookIP`) and snapshot it              |
 | `update` | Mutate mutable fields — tags, reverse DNS entries (`UpdateIP`)          |
@@ -43,20 +44,20 @@ swamp model @sntxrr/scaleway-ipam method run delete main-ip
 swamp model @sntxrr/scaleway-ipam method run list main-ip
 ```
 
-`sync` and `list` are read-only. The `create` `source` selects the pool the IP is
-booked from — a Private Network subnet (`{"subnet_id":"..."}`) or a zonal public
-pool (`{"zonal":"fr-par-1"}`). Addresses in this doc are RFC 5737 documentation
-ranges (`192.0.2.x` / `198.51.100.x` / `203.0.113.x`).
+`sync` and `list` are read-only. The `create` `source` selects the pool the IP
+is booked from — a Private Network subnet (`{"subnet_id":"..."}`) or a zonal
+public pool (`{"zonal":"fr-par-1"}`). Addresses in this doc are RFC 5737
+documentation ranges (`192.0.2.x` / `198.51.100.x` / `203.0.113.x`).
 
 ## Global arguments
 
-| Arg         | Required | Default                    | Description                                           |
-| ----------- | -------- | -------------------------- | ----------------------------------------------------- |
-| `secretKey` | yes      | —                          | Scaleway API secret key (sensitive; wire from a vault) |
-| `projectId` | yes      | —                          | Project ID that owns the IP                           |
-| `region`    | no       | `fr-par`                   | Region (`fr-par`, `nl-ams`, `pl-waw`)                 |
-| `ipId`      | yes      | —                          | ID of the managed IP this model manages               |
-| `endpoint`  | no       | `https://api.scaleway.com` | Override the API host                                 |
+| Arg         | Required    | Default                    | Description                                                                                            |
+| ----------- | ----------- | -------------------------- | ------------------------------------------------------------------------------------------------------ |
+| `secretKey` | yes         | —                          | Scaleway API secret key (sensitive; wire from a vault)                                                 |
+| `projectId` | yes         | —                          | Project ID that owns the IP                                                                            |
+| `region`    | no          | `fr-par`                   | Region (`fr-par`, `nl-ams`, `pl-waw`)                                                                  |
+| `ipId`      | conditional | —                          | ID of the managed IP this model manages. Required by every method except `create`, which provisions it |
+| `endpoint`  | no          | `https://api.scaleway.com` | Override the API host                                                                                  |
 
 ## Development
 

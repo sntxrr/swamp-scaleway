@@ -8,11 +8,11 @@ Authenticated with the `X-Auth-Token` header (secret key wired from a vault).
 
 ## Methods
 
-| Method   | What it does                                                            |
-| -------- | ---------------------------------------------------------------------- |
-| `sync`   | Fetch the server's current state (`GetServer`) and store a snapshot     |
+| Method   | What it does                                                                                            |
+| -------- | ------------------------------------------------------------------------------------------------------- |
+| `sync`   | Fetch the server's current state (`GetServer`) and store a snapshot                                     |
 | `action` | Issue a power action: `poweron`, `poweroff`, `reboot`, `stop_in_place`, `terminate`, then re-read state |
-| `list`   | Factory discovery — snapshot every server in the zone (paginated)       |
+| `list`   | Factory discovery — snapshot every server in the zone (paginated)                                       |
 
 ## Setup
 
@@ -39,18 +39,18 @@ swamp model @sntxrr/scaleway-instance method run list web-1
 ```
 
 `sync` and `list` are read-only. Scaleway power actions are asynchronous — the
-server returns a transient state (`starting`, `stopping`); poll `sync` to observe
-the settled state.
+server returns a transient state (`starting`, `stopping`); poll `sync` to
+observe the settled state.
 
 ## Global arguments
 
-| Arg         | Required | Default                     | Description                                             |
-| ----------- | -------- | --------------------------- | ------------------------------------------------------- |
-| `secretKey` | yes      | —                           | Scaleway API secret key (sensitive; wire from a vault)  |
-| `projectId` | yes      | —                           | Project ID that owns the server                         |
-| `zone`      | no       | `fr-par-1`                  | Availability zone (`fr-par-1`, `nl-ams-1`, `pl-waw-1`…) |
-| `serverId`  | yes      | —                           | ID of the Instance server this model manages            |
-| `endpoint`  | no       | `https://api.scaleway.com`  | Override the API host                                   |
+| Arg         | Required    | Default                    | Description                                                                                      |
+| ----------- | ----------- | -------------------------- | ------------------------------------------------------------------------------------------------ |
+| `secretKey` | yes         | —                          | Scaleway API secret key (sensitive; wire from a vault)                                           |
+| `projectId` | yes         | —                          | Project ID that owns the server                                                                  |
+| `zone`      | no          | `fr-par-1`                 | Availability zone (`fr-par-1`, `nl-ams-1`, `pl-waw-1`…)                                          |
+| `serverId`  | conditional | —                          | ID of the Instance server this model manages. Required by every method except the `list` factory |
+| `endpoint`  | no          | `https://api.scaleway.com` | Override the API host                                                                            |
 
 ## Development
 

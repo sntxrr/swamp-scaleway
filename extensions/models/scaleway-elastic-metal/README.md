@@ -9,13 +9,13 @@ Authenticated with the `X-Auth-Token` header (secret key wired from a vault).
 
 ## Methods
 
-| Method   | What it does                                                                        |
-| -------- | ----------------------------------------------------------------------------------- |
-| `sync`   | Fetch the server's current state (`GetServer`) and store a snapshot                  |
-| `create` | Provision a new bare-metal server from a commercial offer, then snapshot it          |
-| `action` | Issue a lifecycle verb: `start`, `stop`, `reboot`, then re-read state                |
-| `delete` | Deprovision the server (idempotent — a `404` is treated as already-absent)           |
-| `list`   | Factory discovery — snapshot every server in the zone (paginated)                    |
+| Method   | What it does                                                                |
+| -------- | --------------------------------------------------------------------------- |
+| `sync`   | Fetch the server's current state (`GetServer`) and store a snapshot         |
+| `create` | Provision a new bare-metal server from a commercial offer, then snapshot it |
+| `action` | Issue a lifecycle verb: `start`, `stop`, `reboot`, then re-read state       |
+| `delete` | Deprovision the server (idempotent — a `404` is treated as already-absent)  |
+| `list`   | Factory discovery — snapshot every server in the zone (paginated)           |
 
 ## Setup
 
@@ -51,13 +51,13 @@ the snapshot as, e.g., `203.0.113.10`.
 
 ## Global arguments
 
-| Arg         | Required | Default                    | Description                                             |
-| ----------- | -------- | -------------------------- | ------------------------------------------------------- |
-| `secretKey` | yes      | —                          | Scaleway API secret key (sensitive; wire from a vault)  |
-| `projectId` | yes      | —                          | Project ID that owns the server                         |
-| `zone`      | no       | `fr-par-1`                 | Availability zone (`fr-par-1`, `nl-ams-1`, `pl-waw-1`…) |
-| `serverId`  | yes      | —                          | ID of the Elastic Metal server this model manages       |
-| `endpoint`  | no       | `https://api.scaleway.com` | Override the API host                                   |
+| Arg         | Required    | Default                    | Description                                                                                                      |
+| ----------- | ----------- | -------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| `secretKey` | yes         | —                          | Scaleway API secret key (sensitive; wire from a vault)                                                           |
+| `projectId` | yes         | —                          | Project ID that owns the server                                                                                  |
+| `zone`      | no          | `fr-par-1`                 | Availability zone (`fr-par-1`, `nl-ams-1`, `pl-waw-1`…)                                                          |
+| `serverId`  | conditional | —                          | ID of the Elastic Metal server this model manages. Required by every method except `create`, which provisions it |
+| `endpoint`  | no          | `https://api.scaleway.com` | Override the API host                                                                                            |
 
 ## Development
 

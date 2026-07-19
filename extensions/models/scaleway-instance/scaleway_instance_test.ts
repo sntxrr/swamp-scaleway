@@ -15,7 +15,7 @@ const G = {
 
 // deno-lint-ignore no-explicit-any
 type AnyCtx = any;
-function makeContext(): {
+function makeContext(globalArgs: Record<string, unknown> = G): {
   ctx: AnyCtx;
   writes: Array<{ spec: string; name: string; data: Record<string, unknown> }>;
 } {
@@ -23,7 +23,7 @@ function makeContext(): {
     { spec: string; name: string; data: Record<string, unknown> }
   > = [];
   const ctx = {
-    globalArgs: G,
+    globalArgs,
     logger: { info: () => {}, warn: () => {} },
     writeResource: (
       spec: string,
@@ -179,3 +179,61 @@ Deno.test("valid-zone check passes for a real zone and fails for a bogus one", (
   assert(fail.errors !== undefined && fail.errors.length > 0);
   assertStringIncludes(fail.errors[0], "us-east-1");
 });
+
+// --- serverId is optional: `list` discovers, other methods require it -------
+
+Deno.test("list works with no serverId set (factory discovery needs no placeholder)", async () => {
+  const { serverId: _omitted, ...noId } = G;
+  const { ctx, writes } = makeContext(noId);
+  await withMockedFetch(
+    () =>
+      new Response(
+        JSON.stringify({
+          servers: [
+            { id: "srv-a", state: "running" },
+            { id: "srv-b", state: "stopped" },
+          ],
+          total_count: 2,
+        }),
+        { status: 200 },
+      ),
+    () => model.methods.list.execute({}, ctx),
+  );
+  // Discovered IDs come from the API, never from a preset globalArg.
+  assertEquals(writes.length, 2);
+  assertEquals(writes.map((w) => w.name).sort(), ["srv-a", "srv-b"]);
+});
+
+for (const method of ["sync", "action"] as const) {
+  Deno.test(`${method} fails fast with an actionable error when serverId is absent`, async () => {
+    const { serverId: _omitted, ...noId } = G;
+    const { ctx, writes } = makeContext(noId);
+    let fetched = false;
+    // `action` requires an args object; `sync` ignores it. The guard runs
+    // before either is read, so one shared shape is fine here.
+    const exec = model.methods[method].execute as unknown as (
+      args: unknown,
+      ctx: unknown,
+    ) => Promise<unknown>;
+    const err = await withMockedFetch(
+      () => {
+        fetched = true;
+        return new Response("{}", { status: 200 });
+      },
+      async () => {
+        try {
+          await exec({ action: "poweron" }, ctx);
+          return null;
+        } catch (e) {
+          return e as Error;
+        }
+      },
+    );
+    assert(err !== null, `${method} should throw when serverId is missing`);
+    assertStringIncludes(err.message, "serverId");
+    assertStringIncludes(err.message, method);
+    // Guard runs before any network call or write.
+    assertEquals(fetched, false);
+    assertEquals(writes.length, 0);
+  });
+}

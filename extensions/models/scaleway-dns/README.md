@@ -11,12 +11,14 @@ Authenticated with the `X-Auth-Token` header (secret key wired from a vault).
 
 ## Methods
 
-| Method         | What it does                                                                 |
-| -------------- | --------------------------------------------------------------------------- |
-| `sync`         | Fetch every DNS record in the zone (`ListDNSZoneRecords`) and store a snapshot per record |
-| `list-records` | Alias of `sync` — snapshot every DNS record in the zone (paginated)         |
-| `list-zones`   | Factory discovery — snapshot every DNS zone in the project (paginated)      |
-| `update`       | Apply a batch of `add`/`set`/`delete`/`clear` record changes to the zone (PATCH), then snapshot the returned records. A `zone-specified` pre-flight check runs first. |
+| Method         | What it does                                                                                                                                                                                                                                             |
+| -------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `sync`         | Fetch every DNS record in the zone (`ListDNSZoneRecords`) and store a snapshot per record                                                                                                                                                                |
+| `list-records` | Alias of `sync` — snapshot every DNS record in the zone (paginated)                                                                                                                                                                                      |
+| `list-zones`   | Factory discovery — snapshot every DNS zone in the project (paginated)                                                                                                                                                                                   |
+| `create`       | Create a **child** DNS zone (`CreateDNSZone`) and snapshot it. Scaleway requires a subdomain — set `dnsZone` to `<label>.<domain>` (the apex/root zone comes from registering the domain, not this API). A `zone-specified` pre-flight check runs first. |
+| `delete`       | Delete the DNS zone (`DeleteDNSZone`); idempotent (a `404` is treated as already absent). A `zone-specified` pre-flight check runs first.                                                                                                                |
+| `update`       | Apply a batch of `add`/`set`/`delete`/`clear` record changes to the zone (PATCH), then snapshot the returned records. A `zone-specified` pre-flight check runs first.                                                                                    |
 
 ## Setup
 
@@ -39,16 +41,25 @@ swamp model @sntxrr/scaleway-dns method run sync example-com
 swamp model @sntxrr/scaleway-dns method run list-records example-com
 swamp model @sntxrr/scaleway-dns method run list-zones example-com
 
+# Create a child zone — the model's dnsZone must be a subdomain, e.g. test.example.com
+# (Scaleway can't create the apex/root zone via the API). subdomain/domain are
+# derived from dnsZone, or pass them explicitly.
+swamp model @sntxrr/scaleway-dns method run create test-example-com
+
 # Add a record (changes is the PATCH body's "changes" array, passed through verbatim)
 swamp model @sntxrr/scaleway-dns method run update example-com \
   --input 'changes=[{"add":{"records":[{"name":"www","type":"A","data":"192.0.2.10","ttl":300}]}}]'
+
+# Delete the zone (idempotent)
+swamp model @sntxrr/scaleway-dns method run delete example-com
 ```
 
-`sync`, `list-records`, and `list-zones` are read-only. `update` mutates the
-zone; each change object holds exactly one of `add` (`{ records }`), `set`
-(`{ id_fields, records }`), `delete` (`{ id_fields }`) or `clear` (`{}`). Because
-it is named `update`, the labeled `zone-specified` pre-flight check auto-fires
-before it runs and fails fast if `dnsZone` is empty.
+`sync`, `list-records`, and `list-zones` are read-only. `create`, `update`, and
+`delete` mutate the zone. For `update`, each change object holds exactly one of
+`add` (`{ records }`), `set` (`{ id_fields, records }`), `delete`
+(`{ id_fields }`) or `clear` (`{}`). Because they are named `create`/`update`/
+`delete`, the labeled `zone-specified` pre-flight check auto-fires before each
+and fails fast if `dnsZone` is empty.
 
 ## Global arguments
 

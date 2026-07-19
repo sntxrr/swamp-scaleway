@@ -37,8 +37,9 @@ const GlobalArgsSchema = z.object({
   region: z.string().default("fr-par").describe(
     "Region, e.g. fr-par, nl-ams, pl-waw.",
   ),
-  secretId: z.string().describe(
-    "ID of the Secret Manager secret this model manages.",
+  secretId: z.string().optional().describe(
+    "ID of the Secret Manager secret this model manages. Optional — `create` " +
+      "provisions a new secret and returns its ID; every other method requires it.",
   ),
   endpoint: z.string().optional().describe(
     "Override the API host. Defaults to https://api.scaleway.com.",
@@ -293,7 +294,10 @@ function toSecretResource(
   observedAt: string,
 ): Record<string, unknown> {
   return {
-    id: (s.id as string) ?? g.secretId,
+    // Callers always supply an id: API responses carry one, and the delete
+    // path passes the guarded secretId. The final "" is unreachable defensive
+    // padding so the snapshot still satisfies SecretSchema's required id.
+    id: (s.id as string) ?? g.secretId ?? "",
     name: (s.name as string) ?? null,
     status: (s.status as string) ?? "unknown",
     versionCount: (s.version_count as number) ?? null,
@@ -318,7 +322,9 @@ function toVersionResource(
   observedAt: string,
 ): Record<string, unknown> {
   return {
-    secretId: (v.secret_id as string) ?? g.secretId,
+    // Version responses always carry secret_id; the guarded globalArg and the
+    // final "" are unreachable defensive padding for the required field.
+    secretId: (v.secret_id as string) ?? g.secretId ?? "",
     revision: (v.revision as number) ?? null,
     status: (v.status as string) ?? "unknown",
     latest: (v.latest as boolean) ?? (v.is_latest as boolean) ?? null,
@@ -331,11 +337,31 @@ function toVersionResource(
 const secretsPath = (g: GlobalArgs): string =>
   `/secret-manager/v1beta1/regions/${g.region}/secrets`;
 
+/**
+ * Resolve the managed secret ID for methods that act on an *existing* secret.
+ *
+ * `secretId` is optional in the global schema because `create` provisions the
+ * secret and learns its ID from the API — requiring it up front would force
+ * callers to pass a throwaway placeholder just to satisfy validation. Methods
+ * that read or mutate an existing secret call this to fail fast with an
+ * actionable message.
+ */
+function requireSecretId(g: GlobalArgs, method: string): string {
+  if (!g.secretId) {
+    throw new Error(
+      `The "${method}" method requires globalArgs.secretId — the ID of an ` +
+        `existing secret. Set secretId on the model, or run "create" first to ` +
+        `provision one.`,
+    );
+  }
+  return g.secretId;
+}
+
 // --- Model -----------------------------------------------------------------
 /** Scaleway Secret Manager model — one instance per secret, keyed by secretId. */
 export const model = {
   type: "@sntxrr/scaleway-secret-manager",
-  version: "2026.07.18.1",
+  version: "2026.07.19.1",
   globalArguments: GlobalArgsSchema,
   resources: {
     "secret": {
@@ -392,18 +418,19 @@ export const model = {
         context: ExecuteContext,
       ): Promise<{ dataHandles: Array<{ name: string }> }> => {
         const { globalArgs: g, logger } = context;
-        logger.info("Syncing Scaleway secret {id}", { id: g.secretId });
+        const secretId = requireSecretId(g, "sync");
+        logger.info("Syncing Scaleway secret {id}", { id: secretId });
         const res = await scalewayFetch<Record<string, unknown>>(
           g,
           "GET",
-          `${secretsPath(g)}/${encodeURIComponent(g.secretId)}`,
+          `${secretsPath(g)}/${encodeURIComponent(secretId)}`,
         );
         const handle = await context.writeResource(
           "secret",
-          g.secretId,
+          secretId,
           toSecretResource(res, g, new Date().toISOString()),
         );
-        logger.info("Synced Scaleway secret {id}", { id: g.secretId });
+        logger.info("Synced Scaleway secret {id}", { id: secretId });
         return { dataHandles: [handle] };
       },
     },
@@ -434,7 +461,9 @@ export const model = {
           secretsPath(g),
           body,
         );
-        const newId = (res.id as string) ?? g.secretId;
+        // CreateSecret always returns the new ID; fall back to a preset
+        // secretId only if the caller pinned one, so create never depends on it.
+        const newId = (res.id as string) ?? g.secretId ?? "";
         const handle = await context.writeResource(
           "secret",
           newId,
@@ -456,7 +485,8 @@ export const model = {
         context: ExecuteContext,
       ): Promise<{ dataHandles: Array<{ name: string }> }> => {
         const { globalArgs: g, logger } = context;
-        logger.info("Updating Scaleway secret {id}", { id: g.secretId });
+        const secretId = requireSecretId(g, "update");
+        logger.info("Updating Scaleway secret {id}", { id: secretId });
         const body: Record<string, unknown> = {};
         if (args.name !== undefined) body.name = args.name;
         if (args.tags !== undefined) body.tags = args.tags;
@@ -465,15 +495,15 @@ export const model = {
         const res = await scalewayFetch<Record<string, unknown>>(
           g,
           "PATCH",
-          `${secretsPath(g)}/${encodeURIComponent(g.secretId)}`,
+          `${secretsPath(g)}/${encodeURIComponent(secretId)}`,
           body,
         );
         const handle = await context.writeResource(
           "secret",
-          g.secretId,
+          secretId,
           toSecretResource(res, g, new Date().toISOString()),
         );
-        logger.info("Updated Scaleway secret {id}", { id: g.secretId });
+        logger.info("Updated Scaleway secret {id}", { id: secretId });
         return { dataHandles: [handle] };
       },
     },
@@ -485,7 +515,8 @@ export const model = {
         context: ExecuteContext,
       ): Promise<{ dataHandles: Array<{ name: string }> }> => {
         const { globalArgs: g, logger } = context;
-        logger.info("Deleting Scaleway secret {id}", { id: g.secretId });
+        const secretId = requireSecretId(g, "delete");
+        logger.info("Deleting Scaleway secret {id}", { id: secretId });
         // Idempotent delete: a 404 means the secret is already gone — treat it
         // as success and record an absent snapshot (CONVENTIONS.md §3.2).
         let res: Record<string, unknown> | undefined;
@@ -494,7 +525,7 @@ export const model = {
           res = await scalewayFetch<Record<string, unknown>>(
             g,
             "DELETE",
-            `${secretsPath(g)}/${encodeURIComponent(g.secretId)}`,
+            `${secretsPath(g)}/${encodeURIComponent(secretId)}`,
           );
         } catch (e) {
           // Idempotent delete: already-gone → success. Scaleway signals this as
@@ -511,18 +542,18 @@ export const model = {
         const observedAt = new Date().toISOString();
         const snapshot = absent
           ? toSecretResource(
-            { id: g.secretId, status: "absent" },
+            { id: secretId, status: "absent" },
             g,
             observedAt,
           )
-          : toSecretResource(res ?? { id: g.secretId }, g, observedAt);
+          : toSecretResource(res ?? { id: secretId }, g, observedAt);
         const handle = await context.writeResource(
           "secret",
-          g.secretId,
+          secretId,
           snapshot,
         );
         logger.info("Deleted Scaleway secret {id} (absent={absent})", {
-          id: g.secretId,
+          id: secretId,
           absent,
         });
         return { dataHandles: [handle] };
@@ -569,9 +600,10 @@ export const model = {
         context: ExecuteContext,
       ): Promise<{ dataHandles: Array<{ name: string }> }> => {
         const { globalArgs: g, logger } = context;
+        const secretId = requireSecretId(g, "add-version");
         // Log only the id — never the value.
         logger.info("Adding a version to Scaleway secret {id}", {
-          id: g.secretId,
+          id: secretId,
         });
         const body: Record<string, unknown> = {
           // Base64 the raw value into `data`; the value itself is never logged.
@@ -584,18 +616,18 @@ export const model = {
         const res = await scalewayFetch<Record<string, unknown>>(
           g,
           "POST",
-          `${secretsPath(g)}/${encodeURIComponent(g.secretId)}/versions`,
+          `${secretsPath(g)}/${encodeURIComponent(secretId)}/versions`,
           body,
         );
         // Snapshot only version METADATA — never the value.
         const handle = await context.writeResource(
           "secretVersion",
-          g.secretId,
+          secretId,
           toVersionResource(res, g, new Date().toISOString()),
         );
         logger.info("Added version {revision} to Scaleway secret {id}", {
           revision: (res.revision as number) ?? null,
-          id: g.secretId,
+          id: secretId,
         });
         return { dataHandles: [handle] };
       },
@@ -610,15 +642,16 @@ export const model = {
         context: ExecuteContext,
       ): Promise<{ dataHandles: Array<{ name: string }> }> => {
         const { globalArgs: g, logger } = context;
+        const secretId = requireSecretId(g, "access");
         // Log only the id and revision selector — never the value.
         logger.info("Accessing Scaleway secret {id} revision {revision}", {
-          id: g.secretId,
+          id: secretId,
           revision: args.revision,
         });
         const res = await scalewayFetch<Record<string, unknown>>(
           g,
           "GET",
-          `${secretsPath(g)}/${encodeURIComponent(g.secretId)}/versions/${
+          `${secretsPath(g)}/${encodeURIComponent(secretId)}/versions/${
             encodeURIComponent(args.revision)
           }/access`,
         );
@@ -629,16 +662,16 @@ export const model = {
         const value = rawData ? fromBase64(rawData) : "";
         const handle = await context.writeResource(
           "secretValue",
-          g.secretId,
+          secretId,
           {
-            secretId: (res.secret_id as string) ?? g.secretId,
+            secretId: (res.secret_id as string) ?? secretId,
             revision: (res.revision as number | string) ?? args.revision,
             value,
             observedAt: new Date().toISOString(),
           },
         );
         // Deliberately no value in this (or any) log line.
-        logger.info("Accessed Scaleway secret {id}", { id: g.secretId });
+        logger.info("Accessed Scaleway secret {id}", { id: secretId });
         return { dataHandles: [handle] };
       },
     },

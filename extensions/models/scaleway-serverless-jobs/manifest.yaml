@@ -1,7 +1,7 @@
 manifestVersion: 1
 
 name: "@sntxrr/scaleway-serverless-jobs"
-version: "2026.07.18.1"
+version: "2026.07.19.1"
 description: "Manage a Scaleway Serverless Jobs job definition — sync state, create, update, delete, and run it (starting job runs), plus discover job definitions in a region, via the Serverless Jobs API with X-Auth-Token auth."
 repository: "https://github.com/sntxrr/swamp-scaleway"
 

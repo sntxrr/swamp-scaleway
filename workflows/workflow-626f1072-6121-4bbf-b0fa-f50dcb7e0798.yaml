@@ -1,0 +1,95 @@
+id: 626f1072-6121-4bbf-b0fa-f50dcb7e0798
+name: a1-public-endpoint-teardown
+description: >-
+  Reverse of a1-public-endpoint. Removes the A record, deletes the Public
+  Gateway (detaching but not deleting its IP), then releases the flexible IP.
+  Resource IDs are read from the create run's data via data.latest(), so the
+  same modelNames (a1-ip / a1-gateway / a1-dns) must be reused.
+tags: {}
+inputs:
+  properties:
+    projectId:
+      type: string
+      description: Scaleway Project ID that owns the IP, gateway, and DNS zone.
+    dnsZone:
+      type: string
+      description: DNS zone (domain) the record lives in, e.g. example.com.
+    recordName:
+      type: string
+      default: "@"
+      description: Record name to remove (must match what a1 published).
+    region:
+      type: string
+      default: fr-par
+      description: IPAM region the flexible IP was booked in.
+    zone:
+      type: string
+      default: fr-par-1
+      description: Availability zone of the Public Gateway.
+  required: ["projectId", "dnsZone"]
+jobs:
+  - name: main
+    description: Remove DNS record -> delete gateway -> release IP (reverse order).
+    steps:
+      - name: delete-dns-record
+        description: Delete the A record published by a1 (match by name + type).
+        task:
+          type: model_method
+          modelType: "@sntxrr/scaleway-dns"
+          modelName: a1-dns
+          methodName: update
+          inputs:
+            secretKey: ${{ vault.get(scaleway, SCW_SECRET_KEY) }}
+            projectId: ${{ inputs.projectId }}
+            dnsZone: ${{ inputs.dnsZone }}
+            changes:
+              - delete:
+                  id_fields:
+                    name: ${{ inputs.recordName }}
+                    type: A
+            returnAllRecords: true
+        dependsOn: []
+        weight: 0
+        allowFailure: false
+      - name: delete-gateway
+        description: >-
+          Delete the Public Gateway; keep the IP (deleteIp=false) so IPAM can
+          release it cleanly in the next step.
+        task:
+          type: model_method
+          modelType: "@sntxrr/scaleway-public-gateway"
+          modelName: a1-gateway
+          methodName: delete
+          inputs:
+            secretKey: ${{ vault.get(scaleway, SCW_SECRET_KEY) }}
+            projectId: ${{ inputs.projectId }}
+            zone: ${{ inputs.zone }}
+            gatewayId: ${{ data.latest("a1-gateway", "gateway").attributes.id }}
+            deleteIp: false
+        dependsOn:
+          - step: delete-dns-record
+            condition:
+              type: succeeded
+        weight: 0
+        allowFailure: false
+      - name: release-ip
+        description: Release the flexible IP booked by a1 (ReleaseIP).
+        task:
+          type: model_method
+          modelType: "@sntxrr/scaleway-ipam"
+          modelName: a1-ip
+          methodName: delete
+          inputs:
+            secretKey: ${{ vault.get(scaleway, SCW_SECRET_KEY) }}
+            projectId: ${{ inputs.projectId }}
+            region: ${{ inputs.region }}
+            ipId: ${{ data.latest("a1-ip", "ip").attributes.id }}
+        dependsOn:
+          - step: delete-gateway
+            condition:
+              type: succeeded
+        weight: 0
+        allowFailure: false
+    dependsOn: []
+    weight: 0
+version: 1

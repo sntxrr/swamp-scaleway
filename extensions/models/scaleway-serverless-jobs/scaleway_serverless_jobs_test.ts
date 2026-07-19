@@ -17,7 +17,7 @@ const G = {
 
 // deno-lint-ignore no-explicit-any
 type AnyCtx = any;
-function makeContext(overrides: Record<string, unknown> = {}): {
+function makeContext(globalArgs: Record<string, unknown> = G): {
   ctx: AnyCtx;
   writes: Array<{ spec: string; name: string; data: Record<string, unknown> }>;
 } {
@@ -25,7 +25,7 @@ function makeContext(overrides: Record<string, unknown> = {}): {
     { spec: string; name: string; data: Record<string, unknown> }
   > = [];
   const ctx = {
-    globalArgs: { ...G, ...overrides },
+    globalArgs,
     logger: { info: () => {}, warn: () => {} },
     writeResource: (
       spec: string,
@@ -338,3 +338,66 @@ Deno.test("jobDefinitionsPath is regional and versioned v1alpha2", () => {
     "/serverless-jobs/v1alpha2/regions/fr-par/job-definitions",
   );
 });
+
+// --- jobDefinitionId is optional: create provisions it, others require it ---
+
+Deno.test("create works with no jobDefinitionId set (no placeholder needed)", async () => {
+  const { jobDefinitionId: _omitted, ...noId } = G;
+  const { ctx, writes } = makeContext(noId);
+  await withMockedFetch(
+    () =>
+      new Response(
+        JSON.stringify({
+          id: "55555555-5555-5555-5555-555555555555",
+          name: "provisioned",
+          project_id: G.projectId,
+          region: "fr-par",
+        }),
+        { status: 200 },
+      ),
+    () =>
+      model.methods.create.execute({
+        name: "provisioned",
+        cpuLimit: 500,
+        memoryLimit: 1024,
+        localStorageCapacity: 10240,
+        imageUri: "rg.fr-par.scw.cloud/ns/app:latest",
+      }, ctx),
+  );
+  // The new ID comes from the API response, not from a preset globalArg.
+  assertEquals(writes[0].name, "55555555-5555-5555-5555-555555555555");
+  assertEquals(writes[0].data.id, "55555555-5555-5555-5555-555555555555");
+  assertEquals(writes[0].data.name, "provisioned");
+});
+
+for (const method of ["sync", "update", "delete", "action"] as const) {
+  Deno.test(`${method} fails fast with an actionable error when jobDefinitionId is absent`, async () => {
+    const { jobDefinitionId: _omitted, ...noId } = G;
+    const { ctx, writes } = makeContext(noId);
+    let fetched = false;
+    const err = await withMockedFetch(
+      () => {
+        fetched = true;
+        return new Response("{}", { status: 200 });
+      },
+      async () => {
+        try {
+          // deno-lint-ignore no-explicit-any
+          await (model.methods[method].execute as any)({}, ctx);
+          return null;
+        } catch (e) {
+          return e as Error;
+        }
+      },
+    );
+    assert(
+      err !== null,
+      `${method} should throw when jobDefinitionId is missing`,
+    );
+    assertStringIncludes(err.message, "jobDefinitionId");
+    assertStringIncludes(err.message, method);
+    // Guard runs before any network call or write.
+    assertEquals(fetched, false);
+    assertEquals(writes.length, 0);
+  });
+}

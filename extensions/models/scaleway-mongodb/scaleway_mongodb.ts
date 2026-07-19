@@ -26,8 +26,10 @@ const GlobalArgsSchema = z.object({
   region: z.string().default("fr-par").describe(
     "Region, e.g. fr-par, nl-ams, pl-waw.",
   ),
-  instanceId: z.string().describe(
-    "ID of the MongoDB® Database Instance this model manages.",
+  instanceId: z.string().optional().describe(
+    "ID of the MongoDB® Database Instance this model manages. Optional — " +
+      "`create` provisions a new instance and returns its ID; every other " +
+      "method requires it.",
   ),
   endpoint: z.string().optional().describe(
     "Override the API host. Defaults to https://api.scaleway.com.",
@@ -215,7 +217,10 @@ function toInstanceResource(
   const primary = endpoints && endpoints.length > 0 ? endpoints[0] : undefined;
   const dns = primary?.dns_records as string[] | undefined;
   return {
-    id: (i.id as string) ?? g.instanceId,
+    // Callers always supply an id: API responses carry one, and the delete
+    // path passes the guarded instanceId. The final "" is unreachable defensive
+    // padding so the snapshot still satisfies InstanceSchema's required id.
+    id: (i.id as string) ?? g.instanceId ?? "",
     name: (i.name as string) ?? null,
     status: (i.status as string) ?? "unknown",
     version: (i.version as string) ?? null,
@@ -238,11 +243,32 @@ function toInstanceResource(
 const instancesPath = (g: GlobalArgs): string =>
   `/mongodb/v1/regions/${g.region}/instances`;
 
+/**
+ * Resolve the managed instance ID for methods that act on an *existing*
+ * MongoDB® Database Instance.
+ *
+ * `instanceId` is optional in the global schema because `create` provisions the
+ * instance and learns its ID from the API — requiring it up front would force
+ * callers to pass a throwaway placeholder just to satisfy validation. Methods
+ * that read or mutate an existing instance call this to fail fast with an
+ * actionable message.
+ */
+function requireInstanceId(g: GlobalArgs, method: string): string {
+  if (!g.instanceId) {
+    throw new Error(
+      `The "${method}" method requires globalArgs.instanceId — the ID of an ` +
+        `existing MongoDB® Database Instance. Set instanceId on the model, or ` +
+        `run "create" first to provision one.`,
+    );
+  }
+  return g.instanceId;
+}
+
 // --- Model -----------------------------------------------------------------
 /** Scaleway Managed MongoDB® model — one instance per database, keyed by instanceId. */
 export const model = {
   type: "@sntxrr/scaleway-mongodb",
-  version: "2026.07.18.1",
+  version: "2026.07.19.1",
   globalArguments: GlobalArgsSchema,
   resources: {
     "instance": {
@@ -286,21 +312,22 @@ export const model = {
         context: ExecuteContext,
       ): Promise<{ dataHandles: Array<{ name: string }> }> => {
         const { globalArgs: g, logger } = context;
+        const instanceId = requireInstanceId(g, "sync");
         logger.info("Syncing Scaleway MongoDB instance {id}", {
-          id: g.instanceId,
+          id: instanceId,
         });
         const res = await scalewayFetch<Record<string, unknown>>(
           g,
           "GET",
-          `${instancesPath(g)}/${encodeURIComponent(g.instanceId)}`,
+          `${instancesPath(g)}/${encodeURIComponent(instanceId)}`,
         );
         const handle = await context.writeResource(
           "instance",
-          g.instanceId,
+          instanceId,
           toInstanceResource(res, g, new Date().toISOString()),
         );
         logger.info("Synced Scaleway MongoDB instance {id}", {
-          id: g.instanceId,
+          id: instanceId,
         });
         return { dataHandles: [handle] };
       },
@@ -345,7 +372,10 @@ export const model = {
           instancesPath(g),
           body,
         );
-        const newId = (res.id as string) ?? g.instanceId;
+        // CreateInstance always returns the new ID; fall back to a preset
+        // instanceId only if the caller pinned one, so create never depends on
+        // it being set.
+        const newId = (res.id as string) ?? g.instanceId ?? "";
         const handle = await context.writeResource(
           "instance",
           newId,
@@ -367,8 +397,9 @@ export const model = {
         context: ExecuteContext,
       ): Promise<{ dataHandles: Array<{ name: string }> }> => {
         const { globalArgs: g, logger } = context;
+        const instanceId = requireInstanceId(g, "update");
         logger.info("Updating Scaleway MongoDB instance {id}", {
-          id: g.instanceId,
+          id: instanceId,
         });
         const body: Record<string, unknown> = {};
         if (args.name !== undefined) body.name = args.name;
@@ -376,16 +407,16 @@ export const model = {
         const res = await scalewayFetch<Record<string, unknown>>(
           g,
           "PATCH",
-          `${instancesPath(g)}/${encodeURIComponent(g.instanceId)}`,
+          `${instancesPath(g)}/${encodeURIComponent(instanceId)}`,
           body,
         );
         const handle = await context.writeResource(
           "instance",
-          g.instanceId,
+          instanceId,
           toInstanceResource(res, g, new Date().toISOString()),
         );
         logger.info("Updated Scaleway MongoDB instance {id}", {
-          id: g.instanceId,
+          id: instanceId,
         });
         return { dataHandles: [handle] };
       },
@@ -399,8 +430,9 @@ export const model = {
         context: ExecuteContext,
       ): Promise<{ dataHandles: Array<{ name: string }> }> => {
         const { globalArgs: g, logger } = context;
+        const instanceId = requireInstanceId(g, "delete");
         logger.info("Deleting Scaleway MongoDB instance {id}", {
-          id: g.instanceId,
+          id: instanceId,
         });
         // Idempotent delete: a 404 means the instance is already gone — treat
         // it as success and record an absent snapshot (CONVENTIONS.md §3.2).
@@ -410,7 +442,7 @@ export const model = {
           res = await scalewayFetch<Record<string, unknown>>(
             g,
             "DELETE",
-            `${instancesPath(g)}/${encodeURIComponent(g.instanceId)}`,
+            `${instancesPath(g)}/${encodeURIComponent(instanceId)}`,
           );
         } catch (e) {
           if ((e as { status?: number }).status !== 404) throw e;
@@ -419,20 +451,20 @@ export const model = {
         const observedAt = new Date().toISOString();
         const snapshot = absent
           ? toInstanceResource(
-            { id: g.instanceId, status: "absent" },
+            { id: instanceId, status: "absent" },
             g,
             observedAt,
           )
-          : toInstanceResource(res ?? { id: g.instanceId }, g, observedAt);
+          : toInstanceResource(res ?? { id: instanceId }, g, observedAt);
         const handle = await context.writeResource(
           "instance",
-          g.instanceId,
+          instanceId,
           snapshot,
         );
         logger.info(
           "Deleted Scaleway MongoDB instance {id} (absent={absent})",
           {
-            id: g.instanceId,
+            id: instanceId,
             absent,
           },
         );

@@ -1,7 +1,7 @@
 manifestVersion: 1
 
 name: "@sntxrr/scaleway-serverless-containers"
-version: "2026.07.18.1"
+version: "2026.07.19.1"
 description: "Manage a Scaleway Serverless Container — sync state, create, update, delete, and redeploy a container, and discover containers and namespaces in a region, via the Serverless Containers API with X-Auth-Token auth."
 repository: "https://github.com/sntxrr/swamp-scaleway"
 

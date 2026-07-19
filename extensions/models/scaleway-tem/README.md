@@ -12,11 +12,11 @@ vault).
 
 | Method        | What it does                                                            |
 | ------------- | ----------------------------------------------------------------------- |
-| `sync`        | Fetch the domain's current state (`GetDomain`) and store a snapshot      |
-| `create`      | Register a new sending domain (`CreateDomain`) and snapshot it           |
-| `delete`      | Revoke the domain (`DeleteDomain`, POST `.../{id}/delete`)               |
-| `list`        | Factory discovery — snapshot every domain in the region (paginated)      |
-| `list-emails` | Factory discovery — snapshot every sent email in the region (paginated)  |
+| `sync`        | Fetch the domain's current state (`GetDomain`) and store a snapshot     |
+| `create`      | Register a new sending domain (`CreateDomain`) and snapshot it          |
+| `delete`      | Revoke the domain (`DeleteDomain`, POST `.../{id}/delete`)              |
+| `list`        | Factory discovery — snapshot every domain in the region (paginated)     |
+| `list-emails` | Factory discovery — snapshot every sent email in the region (paginated) |
 
 ## Secret handling
 
@@ -58,13 +58,13 @@ records are configured.
 
 ## Global arguments
 
-| Arg         | Required | Default                    | Description                                            |
-| ----------- | -------- | -------------------------- | ------------------------------------------------------ |
-| `secretKey` | yes      | —                          | Scaleway API secret key (sensitive; wire from a vault) |
-| `projectId` | yes      | —                          | Project ID that owns the domain                        |
-| `region`    | no       | `fr-par`                   | Region (`fr-par`, `nl-ams`, `pl-waw`)                  |
-| `domainId`  | yes      | —                          | ID of the sending domain this model manages            |
-| `endpoint`  | no       | `https://api.scaleway.com` | Override the API host                                  |
+| Arg         | Required    | Default                    | Description                                                                                                |
+| ----------- | ----------- | -------------------------- | ---------------------------------------------------------------------------------------------------------- |
+| `secretKey` | yes         | —                          | Scaleway API secret key (sensitive; wire from a vault)                                                     |
+| `projectId` | yes         | —                          | Project ID that owns the domain                                                                            |
+| `region`    | no          | `fr-par`                   | Region (`fr-par`, `nl-ams`, `pl-waw`)                                                                      |
+| `domainId`  | conditional | —                          | ID of the sending domain this model manages. Required by every method except `create`, which provisions it |
+| `endpoint`  | no          | `https://api.scaleway.com` | Override the API host                                                                                      |
 
 ## Development
 

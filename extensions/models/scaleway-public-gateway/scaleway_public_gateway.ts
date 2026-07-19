@@ -24,8 +24,10 @@ const GlobalArgsSchema = z.object({
   zone: z.string().default("fr-par-1").describe(
     "Availability zone, e.g. fr-par-1, it-mil-1, nl-ams-1, pl-waw-1.",
   ),
-  gatewayId: z.string().describe(
-    "ID of the Public Gateway this model manages.",
+  gatewayId: z.string().optional().describe(
+    "ID of the Public Gateway this model manages. Optional — `create` " +
+      "provisions a new gateway and returns its ID; every other method " +
+      "requires it.",
   ),
   endpoint: z.string().optional().describe(
     "Override the API host. Defaults to https://api.scaleway.com.",
@@ -211,7 +213,10 @@ function toGatewayResource(
 ): Record<string, unknown> {
   const ipv4 = gw.ipv4 as Record<string, unknown> | null | undefined;
   return {
-    id: (gw.id as string) ?? g.gatewayId,
+    // Callers always supply an id: API responses carry one, and the delete
+    // path passes the guarded gatewayId. The final "" is unreachable defensive
+    // padding so the snapshot still satisfies GatewaySchema's required id.
+    id: (gw.id as string) ?? g.gatewayId ?? "",
     name: (gw.name as string) ?? null,
     status: (gw.status as string) ?? "unknown",
     type: (gw.type as string) ?? null,
@@ -233,11 +238,31 @@ function toGatewayResource(
 const gatewaysPath = (g: GlobalArgs): string =>
   `/vpc-gw/v2/zones/${g.zone}/gateways`;
 
+/**
+ * Resolve the managed gateway ID for methods that act on an *existing* gateway.
+ *
+ * `gatewayId` is optional in the global schema because `create` provisions the
+ * gateway and learns its ID from the API — requiring it up front would force
+ * callers to pass a throwaway placeholder just to satisfy validation. Methods
+ * that read or mutate an existing gateway call this to fail fast with an
+ * actionable message.
+ */
+function requireGatewayId(g: GlobalArgs, method: string): string {
+  if (!g.gatewayId) {
+    throw new Error(
+      `The "${method}" method requires globalArgs.gatewayId — the ID of an ` +
+        `existing Public Gateway. Set gatewayId on the model, or run ` +
+        `"create" first to provision one.`,
+    );
+  }
+  return g.gatewayId;
+}
+
 // --- Model -----------------------------------------------------------------
 /** Scaleway Public Gateway model — one instance per gateway, keyed by gatewayId. */
 export const model = {
   type: "@sntxrr/scaleway-public-gateway",
-  version: "2026.07.18.1",
+  version: "2026.07.19.1",
   globalArguments: GlobalArgsSchema,
   resources: {
     "gateway": {
@@ -256,21 +281,22 @@ export const model = {
         context: ExecuteContext,
       ): Promise<{ dataHandles: Array<{ name: string }> }> => {
         const { globalArgs: g, logger } = context;
+        const gatewayId = requireGatewayId(g, "sync");
         logger.info("Syncing Scaleway Public Gateway {id}", {
-          id: g.gatewayId,
+          id: gatewayId,
         });
         const res = await scalewayFetch<Record<string, unknown>>(
           g,
           "GET",
-          `${gatewaysPath(g)}/${encodeURIComponent(g.gatewayId)}`,
+          `${gatewaysPath(g)}/${encodeURIComponent(gatewayId)}`,
         );
         const handle = await context.writeResource(
           "gateway",
-          g.gatewayId,
+          gatewayId,
           toGatewayResource(res, g, new Date().toISOString()),
         );
         logger.info("Synced Scaleway Public Gateway {id}", {
-          id: g.gatewayId,
+          id: gatewayId,
         });
         return { dataHandles: [handle] };
       },
@@ -303,7 +329,10 @@ export const model = {
           gatewaysPath(g),
           body,
         );
-        const newId = (res.id as string) ?? g.gatewayId;
+        // CreateGateway always returns the new ID; fall back to a preset
+        // gatewayId only if the caller pinned one, so create never depends on
+        // it being set.
+        const newId = (res.id as string) ?? g.gatewayId ?? "";
         const handle = await context.writeResource(
           "gateway",
           newId,
@@ -322,8 +351,9 @@ export const model = {
         context: ExecuteContext,
       ): Promise<{ dataHandles: Array<{ name: string }> }> => {
         const { globalArgs: g, logger } = context;
+        const gatewayId = requireGatewayId(g, "update");
         logger.info("Updating Scaleway Public Gateway {id}", {
-          id: g.gatewayId,
+          id: gatewayId,
         });
         const body: Record<string, unknown> = {};
         if (args.name !== undefined) body.name = args.name;
@@ -335,16 +365,16 @@ export const model = {
         const res = await scalewayFetch<Record<string, unknown>>(
           g,
           "PATCH",
-          `${gatewaysPath(g)}/${encodeURIComponent(g.gatewayId)}`,
+          `${gatewaysPath(g)}/${encodeURIComponent(gatewayId)}`,
           body,
         );
         const handle = await context.writeResource(
           "gateway",
-          g.gatewayId,
+          gatewayId,
           toGatewayResource(res, g, new Date().toISOString()),
         );
         logger.info("Updated Scaleway Public Gateway {id}", {
-          id: g.gatewayId,
+          id: gatewayId,
         });
         return { dataHandles: [handle] };
       },
@@ -357,15 +387,16 @@ export const model = {
         context: ExecuteContext,
       ): Promise<{ dataHandles: Array<{ name: string }> }> => {
         const { globalArgs: g, logger } = context;
+        const gatewayId = requireGatewayId(g, "delete");
         logger.info("Deleting Scaleway Public Gateway {id}", {
-          id: g.gatewayId,
+          id: gatewayId,
         });
         try {
           await scalewayFetch(
             g,
             "DELETE",
             `${gatewaysPath(g)}/${
-              encodeURIComponent(g.gatewayId)
+              encodeURIComponent(gatewayId)
             }?delete_ip=${args.deleteIp}`,
           );
         } catch (e) {
@@ -375,15 +406,15 @@ export const model = {
         }
         const handle = await context.writeResource(
           "gateway",
-          g.gatewayId,
+          gatewayId,
           toGatewayResource(
-            { id: g.gatewayId, status: "absent" },
+            { id: gatewayId, status: "absent" },
             g,
             new Date().toISOString(),
           ),
         );
         logger.info("Deleted Scaleway Public Gateway {id}", {
-          id: g.gatewayId,
+          id: gatewayId,
         });
         return { dataHandles: [handle] };
       },

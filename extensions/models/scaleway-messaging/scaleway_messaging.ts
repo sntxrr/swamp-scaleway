@@ -28,8 +28,10 @@ const GlobalArgsSchema = z.object({
   region: z.string().default("fr-par").describe(
     "Region, e.g. fr-par, nl-ams, pl-waw.",
   ),
-  natsAccountId: z.string().describe(
-    "ID of the NATS account this model manages.",
+  natsAccountId: z.string().optional().describe(
+    "ID of the NATS account this model manages. Optional — `create` " +
+      "provisions a new account and returns its ID; every other method " +
+      "requires it.",
   ),
   endpoint: z.string().optional().describe(
     "Override the API host. Defaults to https://api.scaleway.com.",
@@ -180,7 +182,11 @@ function toNatsAccountResource(
   observedAt: string,
 ): Record<string, unknown> {
   return {
-    id: (a.id as string) ?? g.natsAccountId,
+    // Callers always supply an id: API responses carry one, and the delete
+    // path passes the guarded natsAccountId. The final "" is unreachable
+    // defensive padding so the snapshot still satisfies NatsAccountSchema's
+    // required id.
+    id: (a.id as string) ?? g.natsAccountId ?? "",
     name: (a.name as string) ?? null,
     endpoint: (a.endpoint as string) ?? null,
     projectId: (a.project_id as string) ?? null,
@@ -195,11 +201,32 @@ function toNatsAccountResource(
 const natsAccountsPath = (g: GlobalArgs): string =>
   `/mnq/v1beta1/regions/${g.region}/nats-accounts`;
 
+/**
+ * Resolve the managed NATS account ID for methods that act on an *existing*
+ * account.
+ *
+ * `natsAccountId` is optional in the global schema because `create` provisions
+ * the account and learns its ID from the API — requiring it up front would force
+ * callers to pass a throwaway placeholder just to satisfy validation. Methods
+ * that read or mutate an existing account call this to fail fast with an
+ * actionable message.
+ */
+function requireNatsAccountId(g: GlobalArgs, method: string): string {
+  if (!g.natsAccountId) {
+    throw new Error(
+      `The "${method}" method requires globalArgs.natsAccountId — the ID of an ` +
+        `existing NATS account. Set natsAccountId on the model, or run ` +
+        `"create" first to provision one.`,
+    );
+  }
+  return g.natsAccountId;
+}
+
 // --- Model -----------------------------------------------------------------
 /** Scaleway MNQ NATS account model — one instance per account, keyed by natsAccountId. */
 export const model = {
   type: "@sntxrr/scaleway-messaging",
-  version: "2026.07.18.1",
+  version: "2026.07.19.1",
   globalArguments: GlobalArgsSchema,
   resources: {
     "nats-account": {
@@ -242,21 +269,22 @@ export const model = {
         context: ExecuteContext,
       ): Promise<{ dataHandles: Array<{ name: string }> }> => {
         const { globalArgs: g, logger } = context;
+        const natsAccountId = requireNatsAccountId(g, "sync");
         logger.info("Syncing Scaleway NATS account {id}", {
-          id: g.natsAccountId,
+          id: natsAccountId,
         });
         const res = await scalewayFetch<Record<string, unknown>>(
           g,
           "GET",
-          `${natsAccountsPath(g)}/${encodeURIComponent(g.natsAccountId)}`,
+          `${natsAccountsPath(g)}/${encodeURIComponent(natsAccountId)}`,
         );
         const handle = await context.writeResource(
           "nats-account",
-          g.natsAccountId,
+          natsAccountId,
           toNatsAccountResource(res, g, new Date().toISOString()),
         );
         logger.info("Synced Scaleway NATS account {id}", {
-          id: g.natsAccountId,
+          id: natsAccountId,
         });
         return { dataHandles: [handle] };
       },
@@ -284,7 +312,10 @@ export const model = {
           natsAccountsPath(g),
           body,
         );
-        const newId = (res.id as string) ?? g.natsAccountId;
+        // CreateNatsAccount always returns the new ID; fall back to a preset
+        // natsAccountId only if the caller pinned one, so create never depends
+        // on it being set.
+        const newId = (res.id as string) ?? g.natsAccountId ?? "";
         const handle = await context.writeResource(
           "nats-account",
           newId,
@@ -306,24 +337,25 @@ export const model = {
         context: ExecuteContext,
       ): Promise<{ dataHandles: Array<{ name: string }> }> => {
         const { globalArgs: g, logger } = context;
+        const natsAccountId = requireNatsAccountId(g, "update");
         logger.info("Updating Scaleway NATS account {id}", {
-          id: g.natsAccountId,
+          id: natsAccountId,
         });
         const body: Record<string, unknown> = {};
         if (args.name !== undefined) body.name = args.name;
         const res = await scalewayFetch<Record<string, unknown>>(
           g,
           "PATCH",
-          `${natsAccountsPath(g)}/${encodeURIComponent(g.natsAccountId)}`,
+          `${natsAccountsPath(g)}/${encodeURIComponent(natsAccountId)}`,
           body,
         );
         const handle = await context.writeResource(
           "nats-account",
-          g.natsAccountId,
+          natsAccountId,
           toNatsAccountResource(res, g, new Date().toISOString()),
         );
         logger.info("Updated Scaleway NATS account {id}", {
-          id: g.natsAccountId,
+          id: natsAccountId,
         });
         return { dataHandles: [handle] };
       },
@@ -336,8 +368,9 @@ export const model = {
         context: ExecuteContext,
       ): Promise<{ dataHandles: Array<{ name: string }> }> => {
         const { globalArgs: g, logger } = context;
+        const natsAccountId = requireNatsAccountId(g, "delete");
         logger.info("Deleting Scaleway NATS account {id}", {
-          id: g.natsAccountId,
+          id: natsAccountId,
         });
         // Idempotent delete: a 404 means the account is already gone — treat it
         // as success and record an absent snapshot (CONVENTIONS.md §3.2).
@@ -347,7 +380,7 @@ export const model = {
           res = await scalewayFetch<Record<string, unknown>>(
             g,
             "DELETE",
-            `${natsAccountsPath(g)}/${encodeURIComponent(g.natsAccountId)}`,
+            `${natsAccountsPath(g)}/${encodeURIComponent(natsAccountId)}`,
           );
         } catch (e) {
           if ((e as { status?: number }).status !== 404) throw e;
@@ -356,21 +389,21 @@ export const model = {
         const observedAt = new Date().toISOString();
         const snapshot = absent
           ? {
-            ...toNatsAccountResource({ id: g.natsAccountId }, g, observedAt),
+            ...toNatsAccountResource({ id: natsAccountId }, g, observedAt),
             absent: true,
           }
           : toNatsAccountResource(
-            res ?? { id: g.natsAccountId },
+            res ?? { id: natsAccountId },
             g,
             observedAt,
           );
         const handle = await context.writeResource(
           "nats-account",
-          g.natsAccountId,
+          natsAccountId,
           snapshot,
         );
         logger.info("Deleted Scaleway NATS account {id} (absent={absent})", {
-          id: g.natsAccountId,
+          id: natsAccountId,
           absent,
         });
         return { dataHandles: [handle] };

@@ -1,7 +1,7 @@
 manifestVersion: 1
 
 name: "@sntxrr/scaleway-registry"
-version: "2026.07.18.1"
+version: "2026.07.19.1"
 description: "Manage a Scaleway Container Registry namespace — sync state, create, update, and delete namespaces, and discover namespaces in a region, via the Registry API with X-Auth-Token auth."
 repository: "https://github.com/sntxrr/swamp-scaleway"
 

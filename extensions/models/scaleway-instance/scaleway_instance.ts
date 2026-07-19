@@ -22,8 +22,9 @@ const GlobalArgsSchema = z.object({
   zone: z.string().default("fr-par-1").describe(
     "Availability zone, e.g. fr-par-1, nl-ams-1, pl-waw-1.",
   ),
-  serverId: z.string().describe(
-    "ID of the Instance server this model manages.",
+  serverId: z.string().optional().describe(
+    "ID of the Instance server this model manages. Optional — the `list` " +
+      "factory discovers servers across the zone; `sync` and `action` require it.",
   ),
   endpoint: z.string().optional().describe(
     "Override the API host. Defaults to https://api.scaleway.com.",
@@ -149,7 +150,10 @@ function toServerResource(
 ): Record<string, unknown> {
   const addr = s.public_ip as Record<string, unknown> | null | undefined;
   return {
-    id: (s.id as string) ?? g.serverId,
+    // Callers always supply an id: API responses carry one, and the guarded
+    // methods pass a resolved serverId. The final "" is unreachable defensive
+    // padding so the snapshot still satisfies the schema's required id.
+    id: (s.id as string) ?? g.serverId ?? "",
     name: (s.name as string) ?? null,
     state: (s.state as string) ?? "unknown",
     zone: (s.zone as string) ?? g.zone,
@@ -161,6 +165,25 @@ function toServerResource(
 
 const serversPath = (g: GlobalArgs): string =>
   `/instance/v1/zones/${g.zone}/servers`;
+
+/**
+ * Resolve the managed server ID for methods that act on an *existing* server.
+ *
+ * `serverId` is optional in the global schema so the `list` factory can
+ * discover every server in the zone without the caller inventing a throwaway
+ * placeholder. Methods that read or mutate one specific server call this to
+ * fail fast with an actionable message.
+ */
+function requireServerId(g: GlobalArgs, method: string): string {
+  if (!g.serverId) {
+    throw new Error(
+      `The "${method}" method requires globalArgs.serverId — the ID of an ` +
+        `existing Instance server. Set serverId on the model, or use "list" to ` +
+        `discover servers in the zone.`,
+    );
+  }
+  return g.serverId;
+}
 
 /** The nine Scaleway availability zones (fr-par, nl-ams, pl-waw × 1..3). */
 const SCALEWAY_ZONES: readonly string[] = [
@@ -179,7 +202,7 @@ const SCALEWAY_ZONES: readonly string[] = [
 /** Scaleway Instance server model — one instance per server, keyed by serverId. */
 export const model = {
   type: "@sntxrr/scaleway-instance",
-  version: "2026.07.18.2",
+  version: "2026.07.19.1",
   globalArguments: GlobalArgsSchema,
   resources: {
     "server": {
@@ -198,19 +221,20 @@ export const model = {
         context: ExecuteContext,
       ): Promise<{ dataHandles: Array<{ name: string }> }> => {
         const { globalArgs: g, logger } = context;
-        logger.info("Syncing Scaleway server {id}", { id: g.serverId });
+        const serverId = requireServerId(g, "sync");
+        logger.info("Syncing Scaleway server {id}", { id: serverId });
         const res = await scalewayFetch<{ server: Record<string, unknown> }>(
           g,
           "GET",
-          `${serversPath(g)}/${encodeURIComponent(g.serverId)}`,
+          `${serversPath(g)}/${encodeURIComponent(serverId)}`,
         );
         const handle = await context.writeResource(
           "server",
-          g.serverId,
+          serverId,
           toServerResource(res.server, g, new Date().toISOString()),
         );
         logger.info("Synced Scaleway server {id} in {zone}", {
-          id: g.serverId,
+          id: serverId,
           zone: g.zone,
         });
         return { dataHandles: [handle] };
@@ -225,14 +249,15 @@ export const model = {
         context: ExecuteContext,
       ): Promise<{ dataHandles: Array<{ name: string }> }> => {
         const { globalArgs: g, logger } = context;
+        const serverId = requireServerId(g, "action");
         logger.info("Server {id} action {action}", {
-          id: g.serverId,
+          id: serverId,
           action: args.action,
         });
         await scalewayFetch(
           g,
           "POST",
-          `${serversPath(g)}/${encodeURIComponent(g.serverId)}/action`,
+          `${serversPath(g)}/${encodeURIComponent(serverId)}/action`,
           { action: args.action },
         );
         const now = new Date().toISOString();
@@ -240,20 +265,20 @@ export const model = {
         // resource is gone) and surface a false failure. Write a synthetic
         // `terminating` snapshot instead. All other actions re-read state.
         const server = args.action === "terminate"
-          ? { id: g.serverId, state: "terminating", zone: g.zone }
+          ? { id: serverId, state: "terminating", zone: g.zone }
           : (await scalewayFetch<{ server: Record<string, unknown> }>(
             g,
             "GET",
-            `${serversPath(g)}/${encodeURIComponent(g.serverId)}`,
+            `${serversPath(g)}/${encodeURIComponent(serverId)}`,
           )).server;
         const handle = await context.writeResource(
           "server",
-          g.serverId,
+          serverId,
           toServerResource(server, g, now),
         );
         logger.info("Completed action {action} on server {id} in {zone}", {
           action: args.action,
-          id: g.serverId,
+          id: serverId,
           zone: g.zone,
         });
         return { dataHandles: [handle] };

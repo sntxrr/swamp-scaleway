@@ -1,7 +1,7 @@
 manifestVersion: 1
 
 name: "@sntxrr/scaleway-kapsule"
-version: "2026.07.18.1"
+version: "2026.07.19.1"
 description: "Manage a Scaleway Kubernetes Kapsule cluster — sync state, create, update, upgrade, and delete clusters, discover clusters and node pools in a region, and fetch the kubeconfig, via the Kubernetes API with X-Auth-Token auth."
 repository: "https://github.com/sntxrr/swamp-scaleway"
 

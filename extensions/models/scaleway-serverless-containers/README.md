@@ -1,22 +1,22 @@
 # @sntxrr/scaleway-serverless-containers
 
-A [swamp](https://swamp-club.com) model for a **Scaleway Serverless Container** —
-one model instance per container, keyed by its container ID. Wraps the
+A [swamp](https://swamp-club.com) model for a **Scaleway Serverless Container**
+— one model instance per container, keyed by its container ID. Wraps the
 [Scaleway Serverless Containers API](https://www.scaleway.com/en/developers/api/serverless-containers/)
 (`/containers/v1beta1`, regional) using only Deno's built-in `fetch` — no SDK.
 Authenticated with the `X-Auth-Token` header (secret key wired from a vault).
 
 ## Methods
 
-| Method            | What it does                                                              |
-| ----------------- | ------------------------------------------------------------------------ |
-| `sync`            | Fetch the container's current state (`GetContainer`) and store a snapshot |
-| `create`          | Provision a new container in a namespace (`CreateContainer`)              |
+| Method            | What it does                                                                   |
+| ----------------- | ------------------------------------------------------------------------------ |
+| `sync`            | Fetch the container's current state (`GetContainer`) and store a snapshot      |
+| `create`          | Provision a new container in a namespace (`CreateContainer`)                   |
 | `update`          | Mutate mutable fields — image, scale, limits, env, privacy (`UpdateContainer`) |
-| `delete`          | Deprovision the container (`DeleteContainer`); idempotent on 404          |
-| `action`          | Redeploy the container so changes take effect (`RedeployContainer`)       |
-| `list`            | Factory discovery — snapshot every container in the region (paginated)    |
-| `list-namespaces` | Factory discovery — snapshot every namespace in the region (paginated)    |
+| `delete`          | Deprovision the container (`DeleteContainer`); idempotent on 404               |
+| `action`          | Redeploy the container so changes take effect (`RedeployContainer`)            |
+| `list`            | Factory discovery — snapshot every container in the region (paginated)         |
+| `list-namespaces` | Factory discovery — snapshot every namespace in the region (paginated)         |
 
 `create` requires the `namespaceId` global arg. `list` optionally scopes to a
 single namespace when `namespaceId` is set.
@@ -25,9 +25,9 @@ single namespace when `namespaceId` is set.
 
 The `secretKey` global arg is sensitive and wired from a vault; it is sent only
 in the `X-Auth-Token` header and is never logged or written into a snapshot.
-Environment variables and any container secrets are never copied into a
-resource snapshot — snapshots store only non-secret configuration and status
-(image, scale, limits, domain name, port).
+Environment variables and any container secrets are never copied into a resource
+snapshot — snapshots store only non-secret configuration and status (image,
+scale, limits, domain name, port).
 
 ## Setup
 
@@ -65,14 +65,14 @@ redeploys are asynchronous — the container returns a transient status
 
 ## Global arguments
 
-| Arg           | Required | Default                    | Description                                             |
-| ------------- | -------- | -------------------------- | ------------------------------------------------------- |
-| `secretKey`   | yes      | —                          | Scaleway API secret key (sensitive; wire from a vault)  |
-| `projectId`   | yes      | —                          | Project ID that owns the container and namespaces       |
-| `region`      | no       | `fr-par`                   | Region (`fr-par`, `nl-ams`, `pl-waw`)                   |
-| `containerId` | yes      | —                          | ID of the container this model manages                  |
-| `namespaceId` | no       | —                          | Namespace ID (required for `create`; optional `list` filter) |
-| `endpoint`    | no       | `https://api.scaleway.com` | Override the API host                                   |
+| Arg           | Required    | Default                    | Description                                                                                           |
+| ------------- | ----------- | -------------------------- | ----------------------------------------------------------------------------------------------------- |
+| `secretKey`   | yes         | —                          | Scaleway API secret key (sensitive; wire from a vault)                                                |
+| `projectId`   | yes         | —                          | Project ID that owns the container and namespaces                                                     |
+| `region`      | no          | `fr-par`                   | Region (`fr-par`, `nl-ams`, `pl-waw`)                                                                 |
+| `containerId` | conditional | —                          | ID of the container this model manages. Required by every method except `create`, which provisions it |
+| `namespaceId` | no          | —                          | Namespace ID (required for `create`; optional `list` filter)                                          |
+| `endpoint`    | no          | `https://api.scaleway.com` | Override the API host                                                                                 |
 
 ## Development
 

@@ -23,7 +23,10 @@ const GlobalArgsSchema = z.object({
   region: z.string().default("fr-par").describe(
     "Region, e.g. fr-par, nl-ams, pl-waw.",
   ),
-  vpcId: z.string().describe("ID of the VPC this model manages."),
+  vpcId: z.string().optional().describe(
+    "ID of the VPC this model manages. Optional — `create` provisions a new " +
+      "VPC and returns its ID; every other method requires it.",
+  ),
   endpoint: z.string().optional().describe(
     "Override the API host. Defaults to https://api.scaleway.com.",
   ),
@@ -212,7 +215,10 @@ function toVpcResource(
   observedAt: string,
 ): Record<string, unknown> {
   return {
-    id: (v.id as string) ?? g.vpcId,
+    // Callers always supply an id: API responses carry one, and the delete
+    // path passes the guarded vpcId. The final "" is unreachable defensive
+    // padding so the snapshot still satisfies VpcSchema's required id.
+    id: (v.id as string) ?? g.vpcId ?? "",
     name: (v.name as string) ?? null,
     organizationId: (v.organization_id as string) ?? null,
     projectId: (v.project_id as string) ?? g.projectId,
@@ -253,11 +259,30 @@ const vpcsPath = (g: GlobalArgs): string => `/vpc/v2/regions/${g.region}/vpcs`;
 const privateNetworksPath = (g: GlobalArgs): string =>
   `/vpc/v2/regions/${g.region}/private-networks`;
 
+/**
+ * Resolve the managed VPC ID for methods that act on an *existing* VPC.
+ *
+ * `vpcId` is optional in the global schema because `create` provisions the VPC
+ * and learns its ID from the API — requiring it up front would force callers to
+ * pass a throwaway placeholder just to satisfy validation. Methods that read or
+ * mutate an existing VPC call this to fail fast with an actionable message.
+ */
+function requireVpcId(g: GlobalArgs, method: string): string {
+  if (!g.vpcId) {
+    throw new Error(
+      `The "${method}" method requires globalArgs.vpcId — the ID of an ` +
+        `existing VPC. Set vpcId on the model, or run "create" first to ` +
+        `provision one.`,
+    );
+  }
+  return g.vpcId;
+}
+
 // --- Model -----------------------------------------------------------------
 /** Scaleway VPC model — one instance per VPC, keyed by vpcId. */
 export const model = {
   type: "@sntxrr/scaleway-vpc",
-  version: "2026.07.18.1",
+  version: "2026.07.19.1",
   globalArguments: GlobalArgsSchema,
   resources: {
     "vpc": {
@@ -282,18 +307,19 @@ export const model = {
         context: ExecuteContext,
       ): Promise<{ dataHandles: Array<{ name: string }> }> => {
         const { globalArgs: g, logger } = context;
-        logger.info("Syncing Scaleway VPC {id}", { id: g.vpcId });
+        const vpcId = requireVpcId(g, "sync");
+        logger.info("Syncing Scaleway VPC {id}", { id: vpcId });
         const res = await scalewayFetch<Record<string, unknown>>(
           g,
           "GET",
-          `${vpcsPath(g)}/${encodeURIComponent(g.vpcId)}`,
+          `${vpcsPath(g)}/${encodeURIComponent(vpcId)}`,
         );
         const handle = await context.writeResource(
           "vpc",
-          g.vpcId,
+          vpcId,
           toVpcResource(res, g, new Date().toISOString()),
         );
-        logger.info("Synced Scaleway VPC {id}", { id: g.vpcId });
+        logger.info("Synced Scaleway VPC {id}", { id: vpcId });
         return { dataHandles: [handle] };
       },
     },
@@ -323,7 +349,9 @@ export const model = {
           vpcsPath(g),
           body,
         );
-        const newId = (res.id as string) ?? g.vpcId;
+        // CreateVPC always returns the new ID; fall back to a preset vpcId only
+        // if the caller pinned one, so create never depends on it being set.
+        const newId = (res.id as string) ?? g.vpcId ?? "";
         const handle = await context.writeResource(
           "vpc",
           newId,
@@ -345,7 +373,8 @@ export const model = {
         context: ExecuteContext,
       ): Promise<{ dataHandles: Array<{ name: string }> }> => {
         const { globalArgs: g, logger } = context;
-        logger.info("Updating Scaleway VPC {id}", { id: g.vpcId });
+        const vpcId = requireVpcId(g, "update");
+        logger.info("Updating Scaleway VPC {id}", { id: vpcId });
         const body: Record<string, unknown> = {};
         if (args.name !== undefined) body.name = args.name;
         if (args.tags !== undefined) body.tags = args.tags;
@@ -355,15 +384,15 @@ export const model = {
         const res = await scalewayFetch<Record<string, unknown>>(
           g,
           "PATCH",
-          `${vpcsPath(g)}/${encodeURIComponent(g.vpcId)}`,
+          `${vpcsPath(g)}/${encodeURIComponent(vpcId)}`,
           body,
         );
         const handle = await context.writeResource(
           "vpc",
-          g.vpcId,
+          vpcId,
           toVpcResource(res, g, new Date().toISOString()),
         );
-        logger.info("Updated Scaleway VPC {id}", { id: g.vpcId });
+        logger.info("Updated Scaleway VPC {id}", { id: vpcId });
         return { dataHandles: [handle] };
       },
     },
@@ -375,25 +404,26 @@ export const model = {
         context: ExecuteContext,
       ): Promise<{ dataHandles: Array<{ name: string }> }> => {
         const { globalArgs: g, logger } = context;
-        logger.info("Deleting Scaleway VPC {id}", { id: g.vpcId });
+        const vpcId = requireVpcId(g, "delete");
+        logger.info("Deleting Scaleway VPC {id}", { id: vpcId });
         try {
           await scalewayFetch(
             g,
             "DELETE",
-            `${vpcsPath(g)}/${encodeURIComponent(g.vpcId)}`,
+            `${vpcsPath(g)}/${encodeURIComponent(vpcId)}`,
           );
         } catch (e) {
           if ((e as { status?: number }).status !== 404) throw e;
           logger.info("Scaleway VPC {id} already absent (404)", {
-            id: g.vpcId,
+            id: vpcId,
           });
         }
         const handle = await context.writeResource(
           "vpc",
-          g.vpcId,
+          vpcId,
           { ...toVpcResource({}, g, new Date().toISOString()), absent: true },
         );
-        logger.info("Deleted Scaleway VPC {id}", { id: g.vpcId });
+        logger.info("Deleted Scaleway VPC {id}", { id: vpcId });
         return { dataHandles: [handle] };
       },
     },

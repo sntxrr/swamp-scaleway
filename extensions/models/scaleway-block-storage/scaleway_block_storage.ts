@@ -25,8 +25,9 @@ const GlobalArgsSchema = z.object({
   zone: z.string().default("fr-par-1").describe(
     "Availability zone, e.g. fr-par-1, nl-ams-1, pl-waw-1.",
   ),
-  volumeId: z.string().describe(
-    "ID of the Block Storage volume this model manages.",
+  volumeId: z.string().optional().describe(
+    "ID of the Block Storage volume this model manages. Optional — `create` " +
+      "provisions a new volume and returns its ID; every other method requires it.",
   ),
   endpoint: z.string().optional().describe(
     "Override the API host. Defaults to https://api.scaleway.com.",
@@ -200,7 +201,10 @@ function toVolumeResource(
 ): Record<string, unknown> {
   const specs = v.specs as Record<string, unknown> | null | undefined;
   return {
-    id: (v.id as string) ?? g.volumeId,
+    // Callers always supply an id: API responses carry one, and the delete
+    // path passes the guarded volumeId. The final "" is unreachable defensive
+    // padding so the snapshot still satisfies VolumeSchema's required id.
+    id: (v.id as string) ?? g.volumeId ?? "",
     name: (v.name as string) ?? null,
     type: (v.type as string) ?? null,
     size: (v.size as number) ?? null,
@@ -221,11 +225,31 @@ function toVolumeResource(
 const volumesPath = (g: GlobalArgs): string =>
   `/block/v1/zones/${g.zone}/volumes`;
 
+/**
+ * Resolve the managed volume ID for methods that act on an *existing* volume.
+ *
+ * `volumeId` is optional in the global schema because `create` provisions the
+ * volume and learns its ID from the API — requiring it up front would force
+ * callers to pass a throwaway placeholder just to satisfy validation. Methods
+ * that read or mutate an existing volume call this to fail fast with an
+ * actionable message.
+ */
+function requireVolumeId(g: GlobalArgs, method: string): string {
+  if (!g.volumeId) {
+    throw new Error(
+      `The "${method}" method requires globalArgs.volumeId — the ID of an ` +
+        `existing Block Storage volume. Set volumeId on the model, or run ` +
+        `"create" first to provision one.`,
+    );
+  }
+  return g.volumeId;
+}
+
 // --- Model -----------------------------------------------------------------
 /** Scaleway Block Storage model — one instance per volume, keyed by volumeId. */
 export const model = {
   type: "@sntxrr/scaleway-block-storage",
-  version: "2026.07.18.1",
+  version: "2026.07.19.1",
   globalArguments: GlobalArgsSchema,
   resources: {
     "volume": {
@@ -278,19 +302,20 @@ export const model = {
         context: ExecuteContext,
       ): Promise<{ dataHandles: Array<{ name: string }> }> => {
         const { globalArgs: g, logger } = context;
-        logger.info("Syncing Scaleway volume {id}", { id: g.volumeId });
+        const volumeId = requireVolumeId(g, "sync");
+        logger.info("Syncing Scaleway volume {id}", { id: volumeId });
         const res = await scalewayFetch<Record<string, unknown>>(
           g,
           "GET",
-          `${volumesPath(g)}/${encodeURIComponent(g.volumeId)}`,
+          `${volumesPath(g)}/${encodeURIComponent(volumeId)}`,
         );
         const handle = await context.writeResource(
           "volume",
-          g.volumeId,
+          volumeId,
           toVolumeResource(res, g, new Date().toISOString()),
         );
         logger.info("Synced Scaleway volume {id} (status {status})", {
-          id: g.volumeId,
+          id: volumeId,
           status: (res.status as string) ?? "unknown",
         });
         return { dataHandles: [handle] };
@@ -326,9 +351,12 @@ export const model = {
           volumesPath(g),
           body,
         );
+        // CreateVolume always returns the new ID; fall back to a preset
+        // volumeId only if the caller pinned one, so create never depends on it.
+        const newId = (res.id as string) ?? g.volumeId ?? "";
         const handle = await context.writeResource(
           "volume",
-          (res.id as string) ?? g.volumeId,
+          newId,
           toVolumeResource(res, g, new Date().toISOString()),
         );
         logger.info("Created Scaleway volume {id} ({name})", {
@@ -347,7 +375,8 @@ export const model = {
         context: ExecuteContext,
       ): Promise<{ dataHandles: Array<{ name: string }> }> => {
         const { globalArgs: g, logger } = context;
-        logger.info("Updating Scaleway volume {id}", { id: g.volumeId });
+        const volumeId = requireVolumeId(g, "update");
+        logger.info("Updating Scaleway volume {id}", { id: volumeId });
         const body: Record<string, unknown> = {};
         if (args.name !== undefined) body.name = args.name;
         if (args.size !== undefined) body.size = args.size;
@@ -356,16 +385,16 @@ export const model = {
         const res = await scalewayFetch<Record<string, unknown>>(
           g,
           "PATCH",
-          `${volumesPath(g)}/${encodeURIComponent(g.volumeId)}`,
+          `${volumesPath(g)}/${encodeURIComponent(volumeId)}`,
           body,
         );
         const handle = await context.writeResource(
           "volume",
-          g.volumeId,
+          volumeId,
           toVolumeResource(res, g, new Date().toISOString()),
         );
         logger.info("Updated Scaleway volume {id} (status {status})", {
-          id: g.volumeId,
+          id: volumeId,
           status: (res.status as string) ?? "unknown",
         });
         return { dataHandles: [handle] };
@@ -379,13 +408,14 @@ export const model = {
         context: ExecuteContext,
       ): Promise<{ dataHandles: Array<{ name: string }> }> => {
         const { globalArgs: g, logger } = context;
-        logger.info("Deleting Scaleway volume {id}", { id: g.volumeId });
+        const volumeId = requireVolumeId(g, "delete");
+        logger.info("Deleting Scaleway volume {id}", { id: volumeId });
         let alreadyGone = false;
         try {
           await scalewayFetch(
             g,
             "DELETE",
-            `${volumesPath(g)}/${encodeURIComponent(g.volumeId)}`,
+            `${volumesPath(g)}/${encodeURIComponent(volumeId)}`,
           );
         } catch (e) {
           // 404 => the volume is already gone; treat delete as idempotent.
@@ -394,16 +424,16 @@ export const model = {
         }
         const handle = await context.writeResource(
           "volume",
-          g.volumeId,
+          volumeId,
           {
-            id: g.volumeId,
+            id: volumeId,
             zone: g.zone,
             status: alreadyGone ? "absent" : "deleting",
             observedAt: new Date().toISOString(),
           },
         );
         logger.info("Deleted Scaleway volume {id} ({state})", {
-          id: g.volumeId,
+          id: volumeId,
           state: alreadyGone ? "already absent" : "deleting",
         });
         return { dataHandles: [handle] };

@@ -8,20 +8,20 @@ Crypto — no SDK, no npm dependencies.
 
 **Auth is different from the other Scaleway extensions.** Object Storage speaks
 the S3 API, so it does **not** use the `X-Auth-Token` header. Every request is
-signed with **AWS Signature Version 4** (service `s3`) from an **access key** and
-**secret key** (both wired from a vault). The signer is implemented inline with
-Web Crypto HMAC-SHA256; the secret key is used only to derive the signing key and
-is never logged or stored in a snapshot.
+signed with **AWS Signature Version 4** (service `s3`) from an **access key**
+and **secret key** (both wired from a vault). The signer is implemented inline
+with Web Crypto HMAC-SHA256; the secret key is used only to derive the signing
+key and is never logged or stored in a snapshot.
 
 ## Methods
 
-| Method          | What it does                                                                       |
-| --------------- | ---------------------------------------------------------------------------------- |
-| `list-buckets`  | Factory discovery — `GET /` → `ListAllMyBucketsResult`; snapshot every bucket        |
-| `create`        | Create the managed bucket (`PUT /{bucket}`); idempotent — a 409 (already yours) is success |
-| `delete`        | Delete the managed bucket (`DELETE /{bucket}`; the bucket must be empty); idempotent — a 404 (already gone) is success |
-| `sync`          | Confirm the managed bucket exists and record its region (`HEAD /{bucket}`)           |
-| `list-objects`  | Factory discovery — `GET /{bucket}?list-type=2` (ListObjectsV2), paginated via tokens |
+| Method         | What it does                                                                                                           |
+| -------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| `list-buckets` | Factory discovery — `GET /` → `ListAllMyBucketsResult`; snapshot every bucket                                          |
+| `create`       | Create the managed bucket (`PUT /{bucket}`); idempotent — a 409 (already yours) is success                             |
+| `delete`       | Delete the managed bucket (`DELETE /{bucket}`; the bucket must be empty); idempotent — a 404 (already gone) is success |
+| `sync`         | Confirm the managed bucket exists and record its region (`HEAD /{bucket}`)                                             |
+| `list-objects` | Factory discovery — `GET /{bucket}?list-type=2` (ListObjectsV2), paginated via tokens                                  |
 
 A labeled pre-flight check (`valid-region`, label `policy`) runs before the
 mutating `create`/`delete` methods and fails fast unless `region` is one of
@@ -62,13 +62,13 @@ swamp model @sntxrr/scaleway-object-storage method run delete my-bucket
 
 ## Global arguments
 
-| Arg         | Required | Default                          | Description                                                           |
-| ----------- | -------- | -------------------------------- | --------------------------------------------------------------------- |
-| `accessKey` | yes      | —                                | Object Storage access key (public half of the API key)                |
-| `secretKey` | yes      | —                                | Object Storage secret key (sensitive; wire from a vault)              |
-| `region`    | no       | `fr-par`                         | Region: `fr-par`, `nl-ams`, or `pl-waw`                               |
-| `bucket`    | yes      | —                                | Bucket this model manages (ignored by `list-buckets`)                 |
-| `endpoint`  | no       | `https://s3.<region>.scw.cloud`  | Override the S3 endpoint base URL                                     |
+| Arg         | Required | Default                         | Description                                              |
+| ----------- | -------- | ------------------------------- | -------------------------------------------------------- |
+| `accessKey` | yes      | —                               | Object Storage access key (public half of the API key)   |
+| `secretKey` | yes      | —                               | Object Storage secret key (sensitive; wire from a vault) |
+| `region`    | no       | `fr-par`                        | Region: `fr-par`, `nl-ams`, or `pl-waw`                  |
+| `bucket`    | yes      | —                               | Bucket this model manages (ignored by `list-buckets`)    |
+| `endpoint`  | no       | `https://s3.<region>.scw.cloud` | Override the S3 endpoint base URL                        |
 
 ## Development
 

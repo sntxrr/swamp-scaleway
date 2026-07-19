@@ -28,8 +28,9 @@ const GlobalArgsSchema = z.object({
   zone: z.string().default("fr-par-1").describe(
     "Availability zone. Apple silicon is limited to fr-par-1 and fr-par-3.",
   ),
-  serverId: z.string().describe(
-    "ID of the Apple silicon server this model manages.",
+  serverId: z.string().optional().describe(
+    "ID of the Apple silicon server this model manages. Optional — `create` " +
+      "provisions a new server and returns its ID; every other method requires it.",
   ),
   endpoint: z.string().optional().describe(
     "Override the API host. Defaults to https://api.scaleway.com.",
@@ -224,7 +225,10 @@ function toServerResource(
   observedAt: string,
 ): Record<string, unknown> {
   return {
-    id: (s.id as string) ?? g.serverId,
+    // Callers always supply an id: API responses carry one, and the delete
+    // path passes the guarded serverId. The final "" is unreachable defensive
+    // padding so the snapshot still satisfies ServerSchema's required id.
+    id: (s.id as string) ?? g.serverId ?? "",
     name: (s.name as string) ?? null,
     type: (s.type as string) ?? null,
     status: (s.status as string) ?? "unknown",
@@ -243,6 +247,26 @@ const serverTypesPath = (g: GlobalArgs): string =>
   `/apple-silicon/v1alpha1/zones/${g.zone}/server-types`;
 const osPath = (g: GlobalArgs): string =>
   `/apple-silicon/v1alpha1/zones/${g.zone}/os`;
+
+/**
+ * Resolve the managed server ID for methods that act on an *existing* server.
+ *
+ * `serverId` is optional in the global schema because `create` provisions the
+ * server and learns its ID from the API — requiring it up front would force
+ * callers to pass a throwaway placeholder just to satisfy validation. Methods
+ * that read or mutate an existing server call this to fail fast with an
+ * actionable message.
+ */
+function requireServerId(g: GlobalArgs, method: string): string {
+  if (!g.serverId) {
+    throw new Error(
+      `The "${method}" method requires globalArgs.serverId — the ID of an ` +
+        `existing Apple silicon server. Set serverId on the model, or run ` +
+        `"create" first to provision one.`,
+    );
+  }
+  return g.serverId;
+}
 
 /** Best-effort string coercion for a Scaleway Duration ("86400s" or {seconds}). */
 function durationToString(d: unknown): string | null {
@@ -272,7 +296,7 @@ const SCALEWAY_ZONES: readonly string[] = [
 /** Scaleway Apple silicon model — one instance per Mac mini, keyed by serverId. */
 export const model = {
   type: "@sntxrr/scaleway-apple-silicon",
-  version: "2026.07.18.1",
+  version: "2026.07.19.1",
   globalArguments: GlobalArgsSchema,
   resources: {
     "server": {
@@ -311,21 +335,22 @@ export const model = {
         context: ExecuteContext,
       ): Promise<{ dataHandles: Array<{ name: string }> }> => {
         const { globalArgs: g, logger } = context;
+        const serverId = requireServerId(g, "sync");
         logger.info("Syncing Scaleway Apple silicon server {id}", {
-          id: g.serverId,
+          id: serverId,
         });
         const server = await scalewayFetch<Record<string, unknown>>(
           g,
           "GET",
-          `${serversPath(g)}/${encodeURIComponent(g.serverId)}`,
+          `${serversPath(g)}/${encodeURIComponent(serverId)}`,
         );
         const handle = await context.writeResource(
           "server",
-          g.serverId,
+          serverId,
           toServerResource(server, g, new Date().toISOString()),
         );
         logger.info("Synced Apple silicon server {id} in {zone}", {
-          id: g.serverId,
+          id: serverId,
           zone: g.zone,
         });
         return { dataHandles: [handle] };
@@ -359,11 +384,10 @@ export const model = {
         );
         const resource = toServerResource(server, g, new Date().toISOString());
         // Key the snapshot under the newly returned real ID, never "latest".
-        const handle = await context.writeResource(
-          "server",
-          (server.id as string) ?? g.serverId,
-          resource,
-        );
+        // CreateServer always returns it; fall back to a preset serverId only if
+        // the caller pinned one, so create never depends on it being set.
+        const newId = (server.id as string) ?? g.serverId ?? "";
+        const handle = await context.writeResource("server", newId, resource);
         logger.info("Created Apple silicon server {id} in {zone}", {
           id: resource.id,
           zone: g.zone,
@@ -379,7 +403,8 @@ export const model = {
         context: ExecuteContext,
       ): Promise<{ dataHandles: Array<{ name: string }> }> => {
         const { globalArgs: g, logger } = context;
-        logger.info("Updating Apple silicon server {id}", { id: g.serverId });
+        const serverId = requireServerId(g, "update");
+        logger.info("Updating Apple silicon server {id}", { id: serverId });
         const body: Record<string, unknown> = {};
         if (args.name !== undefined) body.name = args.name;
         if (args.scheduleDeletion !== undefined) {
@@ -389,16 +414,16 @@ export const model = {
         const server = await scalewayFetch<Record<string, unknown>>(
           g,
           "PATCH",
-          `${serversPath(g)}/${encodeURIComponent(g.serverId)}`,
+          `${serversPath(g)}/${encodeURIComponent(serverId)}`,
           body,
         );
         const handle = await context.writeResource(
           "server",
-          g.serverId,
+          serverId,
           toServerResource(server, g, new Date().toISOString()),
         );
         logger.info("Updated Apple silicon server {id} in {zone}", {
-          id: g.serverId,
+          id: serverId,
           zone: g.zone,
         });
         return { dataHandles: [handle] };
@@ -413,24 +438,25 @@ export const model = {
         context: ExecuteContext,
       ): Promise<{ dataHandles: Array<{ name: string }> }> => {
         const { globalArgs: g, logger } = context;
-        logger.info("Deleting Apple silicon server {id}", { id: g.serverId });
+        const serverId = requireServerId(g, "delete");
+        logger.info("Deleting Apple silicon server {id}", { id: serverId });
         try {
           await scalewayFetch(
             g,
             "DELETE",
-            `${serversPath(g)}/${encodeURIComponent(g.serverId)}`,
+            `${serversPath(g)}/${encodeURIComponent(serverId)}`,
           );
         } catch (e) {
           // Already gone → success (idempotent delete). Re-throw anything else.
           if ((e as { status?: number }).status !== 404) throw e;
           logger.info("Apple silicon server {id} already absent (404)", {
-            id: g.serverId,
+            id: serverId,
           });
         }
         const now = new Date().toISOString();
         const resource = {
           ...toServerResource(
-            { id: g.serverId, status: "deleted", zone: g.zone },
+            { id: serverId, status: "deleted", zone: g.zone },
             g,
             now,
           ),
@@ -438,11 +464,11 @@ export const model = {
         };
         const handle = await context.writeResource(
           "server",
-          g.serverId,
+          serverId,
           resource,
         );
         logger.info("Deleted Apple silicon server {id} in {zone}", {
-          id: g.serverId,
+          id: serverId,
           zone: g.zone,
         });
         return { dataHandles: [handle] };
@@ -456,29 +482,30 @@ export const model = {
         context: ExecuteContext,
       ): Promise<{ dataHandles: Array<{ name: string }> }> => {
         const { globalArgs: g, logger } = context;
+        const serverId = requireServerId(g, "action");
         logger.info("Apple silicon server {id} action {action}", {
-          id: g.serverId,
+          id: serverId,
           action: args.action,
         });
         await scalewayFetch(
           g,
           "POST",
-          `${serversPath(g)}/${encodeURIComponent(g.serverId)}/${args.action}`,
+          `${serversPath(g)}/${encodeURIComponent(serverId)}/${args.action}`,
         );
         // Re-read settled state after the reboot request is accepted.
         const server = await scalewayFetch<Record<string, unknown>>(
           g,
           "GET",
-          `${serversPath(g)}/${encodeURIComponent(g.serverId)}`,
+          `${serversPath(g)}/${encodeURIComponent(serverId)}`,
         );
         const handle = await context.writeResource(
           "server",
-          g.serverId,
+          serverId,
           toServerResource(server, g, new Date().toISOString()),
         );
         logger.info("Completed action {action} on server {id} in {zone}", {
           action: args.action,
-          id: g.serverId,
+          id: serverId,
           zone: g.zone,
         });
         return { dataHandles: [handle] };
@@ -612,19 +639,20 @@ export const model = {
         context: ExecuteContext,
       ): Promise<{ dataHandles: Array<{ name: string }> }> => {
         const { globalArgs: g, logger } = context;
+        const serverId = requireServerId(g, "connection-info");
         logger.info(
           "Fetching connection info for Apple silicon server {id}",
-          { id: g.serverId },
+          { id: serverId },
         );
         const server = await scalewayFetch<Record<string, unknown>>(
           g,
           "GET",
-          `${serversPath(g)}/${encodeURIComponent(g.serverId)}`,
+          `${serversPath(g)}/${encodeURIComponent(serverId)}`,
         );
         // Sensitive fields land ONLY in the `connection` spec (sensitiveOutput,
         // vaulted before persistence). Never logged, never in the metadata snap.
-        const handle = await context.writeResource("connection", g.serverId, {
-          serverId: (server.id as string) ?? g.serverId,
+        const handle = await context.writeResource("connection", serverId, {
+          serverId: (server.id as string) ?? serverId,
           sshUsername: (server.ssh_username as string) ?? null,
           sudoPassword: (server.sudo_password as string) ?? null,
           vncUrl: (server.vnc_url as string) ?? null,
@@ -636,7 +664,7 @@ export const model = {
         logger.info(
           "Captured connection info for server {id} (ssh={ssh} sudo={sudo} vnc={vnc})",
           {
-            id: g.serverId,
+            id: serverId,
             ssh: server.ssh_username != null,
             sudo: server.sudo_password != null,
             vnc: server.vnc_url != null,

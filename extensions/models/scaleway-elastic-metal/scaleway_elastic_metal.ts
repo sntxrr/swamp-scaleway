@@ -25,8 +25,9 @@ const GlobalArgsSchema = z.object({
   zone: z.string().default("fr-par-1").describe(
     "Availability zone, e.g. fr-par-1, nl-ams-1, pl-waw-1.",
   ),
-  serverId: z.string().describe(
-    "ID of the Elastic Metal server this model manages.",
+  serverId: z.string().optional().describe(
+    "ID of the Elastic Metal server this model manages. Optional — `create` " +
+      "provisions a new server and returns its ID; every other method requires it.",
   ),
   endpoint: z.string().optional().describe(
     "Override the API host. Defaults to https://api.scaleway.com.",
@@ -187,7 +188,10 @@ function toServerResource(
     | string
     | undefined;
   return {
-    id: (s.id as string) ?? g.serverId,
+    // Callers always supply an id: API responses carry one, and the delete
+    // path passes the guarded serverId. The final "" is unreachable defensive
+    // padding so the snapshot still satisfies ServerSchema's required id.
+    id: (s.id as string) ?? g.serverId ?? "",
     name: (s.name as string) ?? null,
     status: (s.status as string) ?? "unknown",
     zone: (s.zone as string) ?? g.zone,
@@ -203,6 +207,26 @@ function toServerResource(
 /** Zoned collection path for Elastic Metal servers. */
 const serversPath = (g: GlobalArgs): string =>
   `/baremetal/v1/zones/${g.zone}/servers`;
+
+/**
+ * Resolve the managed server ID for methods that act on an *existing* server.
+ *
+ * `serverId` is optional in the global schema because `create` provisions the
+ * server and learns its ID from the API — requiring it up front would force
+ * callers to pass a throwaway placeholder just to satisfy validation. Methods
+ * that read or mutate an existing server call this to fail fast with an
+ * actionable message.
+ */
+function requireServerId(g: GlobalArgs, method: string): string {
+  if (!g.serverId) {
+    throw new Error(
+      `The "${method}" method requires globalArgs.serverId — the ID of an ` +
+        `existing Elastic Metal server. Set serverId on the model, or run ` +
+        `"create" first to provision one.`,
+    );
+  }
+  return g.serverId;
+}
 
 /** The nine Scaleway availability zones (fr-par, nl-ams, pl-waw × 1..3). */
 const SCALEWAY_ZONES: readonly string[] = [
@@ -221,7 +245,7 @@ const SCALEWAY_ZONES: readonly string[] = [
 /** Scaleway Elastic Metal model — one instance per server, keyed by serverId. */
 export const model = {
   type: "@sntxrr/scaleway-elastic-metal",
-  version: "2026.07.18.1",
+  version: "2026.07.19.1",
   globalArguments: GlobalArgsSchema,
   resources: {
     "server": {
@@ -240,21 +264,22 @@ export const model = {
         context: ExecuteContext,
       ): Promise<{ dataHandles: Array<{ name: string }> }> => {
         const { globalArgs: g, logger } = context;
+        const serverId = requireServerId(g, "sync");
         logger.info("Syncing Scaleway Elastic Metal server {id}", {
-          id: g.serverId,
+          id: serverId,
         });
         const server = await scalewayFetch<Record<string, unknown>>(
           g,
           "GET",
-          `${serversPath(g)}/${encodeURIComponent(g.serverId)}`,
+          `${serversPath(g)}/${encodeURIComponent(serverId)}`,
         );
         const handle = await context.writeResource(
           "server",
-          g.serverId,
+          serverId,
           toServerResource(server, g, new Date().toISOString()),
         );
         logger.info("Synced Elastic Metal server {id} in {zone}", {
-          id: g.serverId,
+          id: serverId,
           zone: g.zone,
         });
         return { dataHandles: [handle] };
@@ -284,7 +309,9 @@ export const model = {
             tags: args.tags ?? [],
           },
         );
-        const id = (server.id as string) ?? g.serverId;
+        // CreateServer always returns the new ID; fall back to a preset serverId
+        // only if the caller pinned one, so create never depends on it.
+        const id = (server.id as string) ?? g.serverId ?? "";
         const handle = await context.writeResource(
           "server",
           id,
@@ -306,8 +333,9 @@ export const model = {
         context: ExecuteContext,
       ): Promise<{ dataHandles: Array<{ name: string }> }> => {
         const { globalArgs: g, logger } = context;
+        const serverId = requireServerId(g, "action");
         logger.info("Elastic Metal server {id} action {action}", {
-          id: g.serverId,
+          id: serverId,
           action: args.action,
         });
         // start/reboot accept an optional boot_type; stop takes an empty body.
@@ -317,23 +345,23 @@ export const model = {
         await scalewayFetch(
           g,
           "POST",
-          `${serversPath(g)}/${encodeURIComponent(g.serverId)}/${args.action}`,
+          `${serversPath(g)}/${encodeURIComponent(serverId)}/${args.action}`,
           body,
         );
         const now = new Date().toISOString();
         const server = await scalewayFetch<Record<string, unknown>>(
           g,
           "GET",
-          `${serversPath(g)}/${encodeURIComponent(g.serverId)}`,
+          `${serversPath(g)}/${encodeURIComponent(serverId)}`,
         );
         const handle = await context.writeResource(
           "server",
-          g.serverId,
+          serverId,
           toServerResource(server, g, now),
         );
         logger.info("Completed action {action} on server {id} in {zone}", {
           action: args.action,
-          id: g.serverId,
+          id: serverId,
           zone: g.zone,
         });
         return { dataHandles: [handle] };
@@ -348,8 +376,9 @@ export const model = {
         context: ExecuteContext,
       ): Promise<{ dataHandles: Array<{ name: string }> }> => {
         const { globalArgs: g, logger } = context;
+        const serverId = requireServerId(g, "delete");
         logger.info("Deleting Elastic Metal server {id} in {zone}", {
-          id: g.serverId,
+          id: serverId,
           zone: g.zone,
         });
         let alreadyGone = false;
@@ -357,14 +386,14 @@ export const model = {
           await scalewayFetch(
             g,
             "DELETE",
-            `${serversPath(g)}/${encodeURIComponent(g.serverId)}`,
+            `${serversPath(g)}/${encodeURIComponent(serverId)}`,
           );
         } catch (e) {
           if ((e as { status?: number }).status !== 404) throw e;
           alreadyGone = true;
         }
-        const handle = await context.writeResource("server", g.serverId, {
-          id: g.serverId,
+        const handle = await context.writeResource("server", serverId, {
+          id: serverId,
           name: null,
           status: "deleting",
           zone: g.zone,
@@ -376,7 +405,7 @@ export const model = {
           observedAt: new Date().toISOString(),
         });
         logger.info("Deleted Elastic Metal server {id} (alreadyGone={gone})", {
-          id: g.serverId,
+          id: serverId,
           gone: alreadyGone,
         });
         return { dataHandles: [handle] };

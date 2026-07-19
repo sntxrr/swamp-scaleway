@@ -1,7 +1,7 @@
 manifestVersion: 1
 
 name: "@sntxrr/scaleway-secret-manager"
-version: "2026.07.18.1"
+version: "2026.07.19.1"
 description: "Manage a Scaleway Secret Manager secret — sync/create/update/delete metadata, list secrets in a region, add new secret versions, and access secret values (returned only via a sensitive, vaulted output), via the Secret Manager API with X-Auth-Token auth."
 repository: "https://github.com/sntxrr/swamp-scaleway"
 

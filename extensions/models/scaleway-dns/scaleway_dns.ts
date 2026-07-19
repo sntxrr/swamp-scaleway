@@ -5,12 +5,14 @@
  * zone/region segment in the path) so a swamp model represents a single managed
  * DNS zone, keyed by its domain name (`dnsZone`). Exposes `sync` /
  * `list-records` (snapshot every record in the zone), a factory `list-zones`
- * (snapshot every DNS zone in the project), and `update` (apply a batch of
+ * (snapshot every DNS zone in the project), `create` / `delete` (provision or
+ * deprovision the zone itself), and `update` (apply a batch of
  * add/set/delete/clear record changes via PATCH). Authenticated with the
  * `X-Auth-Token` header (secret key wired from a vault).
  *
- * A labeled pre-flight check (`zone-specified`) auto-runs before `update` (the
- * mutating verb) to ensure the mutation targets a non-empty DNS zone.
+ * A labeled pre-flight check (`zone-specified`) auto-runs before `create`,
+ * `update`, and `delete` (the mutating verbs) to ensure the mutation targets a
+ * non-empty DNS zone.
  *
  * API reference: https://www.scaleway.com/en/developers/api/domains-and-dns/
  * @module
@@ -34,6 +36,18 @@ const GlobalArgsSchema = z.object({
   ),
 });
 type GlobalArgs = z.infer<typeof GlobalArgsSchema>;
+
+const CreateArgsSchema = z.object({
+  domain: z.string().optional().describe(
+    "Parent registrable domain to create the zone under (e.g. example.com). " +
+      "Defaults to globalArgs.dnsZone with its first label stripped.",
+  ),
+  subdomain: z.string().optional().describe(
+    "Subdomain label for the new zone (e.g. `test` for test.example.com). " +
+      "Required by Scaleway's CreateDNSZone — the apex/root zone cannot be " +
+      "created via the API. Defaults to the first label of globalArgs.dnsZone.",
+  ),
+});
 
 const UpdateArgsSchema = z.object({
   changes: z.array(z.record(z.string(), z.unknown())).describe(
@@ -256,7 +270,7 @@ async function syncRecords(
 /** Scaleway Domains & DNS model — one instance per DNS zone, keyed by dnsZone. */
 export const model = {
   type: "@sntxrr/scaleway-dns",
-  version: "2026.07.18.1",
+  version: "2026.07.19.1",
   globalArguments: GlobalArgsSchema,
   resources: {
     "record": {
@@ -347,6 +361,104 @@ export const model = {
           );
         }
         return { dataHandles: handles };
+      },
+    },
+    create: {
+      description: "Create a new DNS zone (CreateDNSZone) and snapshot it.",
+      arguments: CreateArgsSchema,
+      execute: async (
+        args: z.infer<typeof CreateArgsSchema>,
+        context: ExecuteContext,
+      ): Promise<{ dataHandles: Array<{ name: string }> }> => {
+        const { globalArgs: g, logger } = context;
+        // Scaleway's CreateDNSZone always requires a subdomain — the apex/root
+        // zone is created when the domain is registered/added to the account,
+        // not via this API. Derive {subdomain, domain} from the managed dnsZone
+        // (strip the first label) unless the caller overrides them.
+        const labels = g.dnsZone.split(".");
+        const subdomain = args.subdomain ??
+          (labels.length >= 3 ? labels[0] : "");
+        const domain = args.domain ??
+          (labels.length >= 3 ? labels.slice(1).join(".") : g.dnsZone);
+        if (!subdomain) {
+          throw new Error(
+            `Cannot create an apex DNS zone for "${g.dnsZone}" — Scaleway's ` +
+              `CreateDNSZone requires a subdomain (the root zone is created when ` +
+              `the domain is registered/added to your account). Set dnsZone to ` +
+              `"<label>.${g.dnsZone}", or pass an explicit subdomain argument.`,
+          );
+        }
+        logger.info(
+          "Creating DNS zone {sub} under {domain} in project {project}",
+          { sub: subdomain, domain, project: g.projectId },
+        );
+        const res = await scalewayFetch<Record<string, unknown>>(
+          g,
+          "POST",
+          zonesPath(),
+          { domain, subdomain, project_id: g.projectId },
+        );
+        // CreateDNSZone returns the zone flat; tolerate a `dns_zone` wrapper.
+        const zoneRaw = (res.dns_zone as Record<string, unknown> | undefined) ??
+          res;
+        const now = new Date().toISOString();
+        const subOut = (zoneRaw.subdomain as string) ?? subdomain;
+        const domOut = (zoneRaw.domain as string) ?? domain;
+        const key = subOut ? `${subOut}.${domOut}` : domOut;
+        const handle = await context.writeResource(
+          "zone",
+          key || crypto.randomUUID(),
+          toZoneResource(zoneRaw, now),
+        );
+        logger.info("Created DNS zone {key} (status {status})", {
+          key,
+          status: (zoneRaw.status as string) ?? "unknown",
+        });
+        return { dataHandles: [handle] };
+      },
+    },
+    delete: {
+      description:
+        "Delete the managed DNS zone (DeleteDNSZone). Idempotent (404 = already absent).",
+      arguments: z.object({}),
+      execute: async (
+        _args: Record<string, never>,
+        context: ExecuteContext,
+      ): Promise<{ dataHandles: Array<{ name: string }> }> => {
+        const { globalArgs: g, logger } = context;
+        logger.info("Deleting DNS zone {zone} in project {project}", {
+          zone: g.dnsZone,
+          project: g.projectId,
+        });
+        const path = `${zonesPath()}?dns_zone=${
+          encodeURIComponent(g.dnsZone)
+        }&project_id=${encodeURIComponent(g.projectId)}`;
+        let zoneRaw: Record<string, unknown> = {};
+        try {
+          const res = await scalewayFetch<Record<string, unknown>>(
+            g,
+            "DELETE",
+            path,
+          );
+          zoneRaw = (res?.dns_zone as Record<string, unknown> | undefined) ??
+            res ?? {};
+        } catch (e) {
+          if ((e as { status?: number }).status !== 404) throw e;
+          logger.info("DNS zone {zone} already absent (404)", {
+            zone: g.dnsZone,
+          });
+        }
+        const now = new Date().toISOString();
+        // Guarantee the required schema fields even when the API returned
+        // nothing (404) — real values from the response win when present.
+        const merged = { domain: g.dnsZone, status: "deleted", ...zoneRaw };
+        const handle = await context.writeResource(
+          "zone",
+          g.dnsZone,
+          toZoneResource(merged, now),
+        );
+        logger.info("Deleted DNS zone {zone}", { zone: g.dnsZone });
+        return { dataHandles: [handle] };
       },
     },
     update: {

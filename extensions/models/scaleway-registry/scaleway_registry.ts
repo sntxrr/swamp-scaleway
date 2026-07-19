@@ -28,8 +28,10 @@ const GlobalArgsSchema = z.object({
   region: z.string().default("fr-par").describe(
     "Region, e.g. fr-par, nl-ams, pl-waw.",
   ),
-  namespaceId: z.string().describe(
-    "ID of the Container Registry namespace this model manages.",
+  namespaceId: z.string().optional().describe(
+    "ID of the Container Registry namespace this model manages. Optional — " +
+      "`create` provisions a new namespace and returns its ID; every other " +
+      "method requires it.",
   ),
   endpoint: z.string().optional().describe(
     "Override the API host. Defaults to https://api.scaleway.com.",
@@ -202,7 +204,11 @@ function toNamespaceResource(
   observedAt: string,
 ): Record<string, unknown> {
   return {
-    id: (n.id as string) ?? g.namespaceId,
+    // Callers always supply an id: API responses carry one, and the delete
+    // path passes the guarded namespaceId. The final "" is unreachable
+    // defensive padding so the snapshot still satisfies NamespaceSchema's
+    // required id.
+    id: (n.id as string) ?? g.namespaceId ?? "",
     name: (n.name as string) ?? null,
     status: (n.status as string) ?? "unknown",
     statusMessage: (n.status_message as string) ?? null,
@@ -223,11 +229,32 @@ function toNamespaceResource(
 const namespacesPath = (g: GlobalArgs): string =>
   `/registry/v1/regions/${g.region}/namespaces`;
 
+/**
+ * Resolve the managed namespace ID for methods that act on an *existing*
+ * namespace.
+ *
+ * `namespaceId` is optional in the global schema because `create` provisions
+ * the namespace and learns its ID from the API — requiring it up front would
+ * force callers to pass a throwaway placeholder just to satisfy validation.
+ * Methods that read or mutate an existing namespace call this to fail fast with
+ * an actionable message.
+ */
+function requireNamespaceId(g: GlobalArgs, method: string): string {
+  if (!g.namespaceId) {
+    throw new Error(
+      `The "${method}" method requires globalArgs.namespaceId — the ID of an ` +
+        `existing Container Registry namespace. Set namespaceId on the model, ` +
+        `or run "create" first to provision one.`,
+    );
+  }
+  return g.namespaceId;
+}
+
 // --- Model -----------------------------------------------------------------
 /** Scaleway Container Registry model — one instance per namespace, keyed by namespaceId. */
 export const model = {
   type: "@sntxrr/scaleway-registry",
-  version: "2026.07.18.1",
+  version: "2026.07.19.1",
   globalArguments: GlobalArgsSchema,
   resources: {
     "namespace": {
@@ -270,21 +297,22 @@ export const model = {
         context: ExecuteContext,
       ): Promise<{ dataHandles: Array<{ name: string }> }> => {
         const { globalArgs: g, logger } = context;
+        const namespaceId = requireNamespaceId(g, "sync");
         logger.info("Syncing Scaleway registry namespace {id}", {
-          id: g.namespaceId,
+          id: namespaceId,
         });
         const res = await scalewayFetch<Record<string, unknown>>(
           g,
           "GET",
-          `${namespacesPath(g)}/${encodeURIComponent(g.namespaceId)}`,
+          `${namespacesPath(g)}/${encodeURIComponent(namespaceId)}`,
         );
         const handle = await context.writeResource(
           "namespace",
-          g.namespaceId,
+          namespaceId,
           toNamespaceResource(res, g, new Date().toISOString()),
         );
         logger.info("Synced Scaleway registry namespace {id}", {
-          id: g.namespaceId,
+          id: namespaceId,
         });
         return { dataHandles: [handle] };
       },
@@ -314,7 +342,10 @@ export const model = {
           namespacesPath(g),
           body,
         );
-        const newId = (res.id as string) ?? g.namespaceId;
+        // CreateNamespace always returns the new ID; fall back to a preset
+        // namespaceId only if the caller pinned one, so create never depends on
+        // it being set.
+        const newId = (res.id as string) ?? g.namespaceId ?? "";
         const handle = await context.writeResource(
           "namespace",
           newId,
@@ -336,8 +367,9 @@ export const model = {
         context: ExecuteContext,
       ): Promise<{ dataHandles: Array<{ name: string }> }> => {
         const { globalArgs: g, logger } = context;
+        const namespaceId = requireNamespaceId(g, "update");
         logger.info("Updating Scaleway registry namespace {id}", {
-          id: g.namespaceId,
+          id: namespaceId,
         });
         const body: Record<string, unknown> = {};
         if (args.description !== undefined) body.description = args.description;
@@ -345,16 +377,16 @@ export const model = {
         const res = await scalewayFetch<Record<string, unknown>>(
           g,
           "PATCH",
-          `${namespacesPath(g)}/${encodeURIComponent(g.namespaceId)}`,
+          `${namespacesPath(g)}/${encodeURIComponent(namespaceId)}`,
           body,
         );
         const handle = await context.writeResource(
           "namespace",
-          g.namespaceId,
+          namespaceId,
           toNamespaceResource(res, g, new Date().toISOString()),
         );
         logger.info("Updated Scaleway registry namespace {id}", {
-          id: g.namespaceId,
+          id: namespaceId,
         });
         return { dataHandles: [handle] };
       },
@@ -367,8 +399,9 @@ export const model = {
         context: ExecuteContext,
       ): Promise<{ dataHandles: Array<{ name: string }> }> => {
         const { globalArgs: g, logger } = context;
+        const namespaceId = requireNamespaceId(g, "delete");
         logger.info("Deleting Scaleway registry namespace {id}", {
-          id: g.namespaceId,
+          id: namespaceId,
         });
         // Idempotent delete: a 404 means the namespace is already gone — treat
         // it as success and record an absent snapshot (CONVENTIONS.md §3.2).
@@ -378,7 +411,7 @@ export const model = {
           res = await scalewayFetch<Record<string, unknown>>(
             g,
             "DELETE",
-            `${namespacesPath(g)}/${encodeURIComponent(g.namespaceId)}`,
+            `${namespacesPath(g)}/${encodeURIComponent(namespaceId)}`,
           );
         } catch (e) {
           if ((e as { status?: number }).status !== 404) throw e;
@@ -387,20 +420,20 @@ export const model = {
         const observedAt = new Date().toISOString();
         const snapshot = absent
           ? toNamespaceResource(
-            { id: g.namespaceId, status: "absent" },
+            { id: namespaceId, status: "absent" },
             g,
             observedAt,
           )
-          : toNamespaceResource(res ?? { id: g.namespaceId }, g, observedAt);
+          : toNamespaceResource(res ?? { id: namespaceId }, g, observedAt);
         const handle = await context.writeResource(
           "namespace",
-          g.namespaceId,
+          namespaceId,
           snapshot,
         );
         logger.info(
           "Deleted Scaleway registry namespace {id} (absent={absent})",
           {
-            id: g.namespaceId,
+            id: namespaceId,
             absent,
           },
         );

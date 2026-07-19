@@ -1,8 +1,8 @@
 # @sntxrr/scaleway-redis
 
 A [swamp](https://swamp-club.com) model for a **Scaleway Managed Database for
-Redis™ cluster** — one model instance per cluster, keyed by its cluster ID. Wraps
-the
+Redis™ cluster** — one model instance per cluster, keyed by its cluster ID.
+Wraps the
 [Scaleway Managed Database for Redis API](https://www.scaleway.com/en/developers/api/managed-database-redis)
 (`/redis/v1`, zoned) using only Deno's built-in `fetch` — no SDK. Authenticated
 with the `X-Auth-Token` header (secret key wired from a vault).
@@ -10,7 +10,7 @@ with the `X-Auth-Token` header (secret key wired from a vault).
 ## Methods
 
 | Method   | What it does                                                          |
-| -------- | -------------------------------------------------------------------- |
+| -------- | --------------------------------------------------------------------- |
 | `sync`   | Fetch the cluster's current state (`GetCluster`) and store a snapshot |
 | `create` | Provision a new Redis cluster (`CreateCluster`) and snapshot it       |
 | `update` | Mutate mutable fields — name, tags (`UpdateCluster`)                  |
@@ -57,13 +57,13 @@ to observe the settled `ready` state.
 
 ## Global arguments
 
-| Arg         | Required | Default                    | Description                                            |
-| ----------- | -------- | -------------------------- | ------------------------------------------------------ |
-| `secretKey` | yes      | —                          | Scaleway API secret key (sensitive; wire from a vault) |
-| `projectId` | yes      | —                          | Project ID that owns the cluster                       |
-| `zone`      | no       | `fr-par-1`                 | Zone (`fr-par-1`, `nl-ams-1`, `pl-waw-1`, …)           |
-| `clusterId` | yes      | —                          | ID of the Redis cluster this model manages             |
-| `endpoint`  | no       | `https://api.scaleway.com` | Override the API host                                  |
+| Arg         | Required    | Default                    | Description                                                                                               |
+| ----------- | ----------- | -------------------------- | --------------------------------------------------------------------------------------------------------- |
+| `secretKey` | yes         | —                          | Scaleway API secret key (sensitive; wire from a vault)                                                    |
+| `projectId` | yes         | —                          | Project ID that owns the cluster                                                                          |
+| `zone`      | no          | `fr-par-1`                 | Zone (`fr-par-1`, `nl-ams-1`, `pl-waw-1`, …)                                                              |
+| `clusterId` | conditional | —                          | ID of the Redis cluster this model manages. Required by every method except `create`, which provisions it |
+| `endpoint`  | no          | `https://api.scaleway.com` | Override the API host                                                                                     |
 
 ## Development
 

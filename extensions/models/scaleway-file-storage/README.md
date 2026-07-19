@@ -13,13 +13,13 @@ Instances in the same region simultaneously (accessible over Private Networks).
 
 ## Methods
 
-| Method   | What it does                                                              |
-| -------- | ------------------------------------------------------------------------ |
+| Method   | What it does                                                                |
+| -------- | --------------------------------------------------------------------------- |
 | `sync`   | Fetch the filesystem's current state (`GetFileSystem`) and store a snapshot |
-| `create` | Provision a new filesystem (`CreateFileSystem`) and snapshot it           |
-| `update` | Mutate mutable fields — name, size, tags (`UpdateFileSystem`)            |
-| `delete` | Deprovision a detached filesystem (`DeleteFileSystem`)                   |
-| `list`   | Factory discovery — snapshot every filesystem in the region (paginated)   |
+| `create` | Provision a new filesystem (`CreateFileSystem`) and snapshot it             |
+| `update` | Mutate mutable fields — name, size, tags (`UpdateFileSystem`)               |
+| `delete` | Deprovision a detached filesystem (`DeleteFileSystem`)                      |
+| `list`   | Factory discovery — snapshot every filesystem in the region (paginated)     |
 
 ## Setup
 
@@ -57,13 +57,13 @@ must be detached from all Instances before it can be deleted.
 
 ## Global arguments
 
-| Arg            | Required | Default                    | Description                                             |
-| -------------- | -------- | -------------------------- | ------------------------------------------------------- |
-| `secretKey`    | yes      | —                          | Scaleway API secret key (sensitive; wire from a vault)  |
-| `projectId`    | yes      | —                          | Project ID that owns the filesystem                     |
-| `region`       | no       | `fr-par`                   | Region (`fr-par`, `nl-ams`, `pl-waw`)                   |
-| `filesystemId` | yes      | —                          | ID of the filesystem this model manages                 |
-| `endpoint`     | no       | `https://api.scaleway.com` | Override the API host                                   |
+| Arg            | Required    | Default                    | Description                                                                                            |
+| -------------- | ----------- | -------------------------- | ------------------------------------------------------------------------------------------------------ |
+| `secretKey`    | yes         | —                          | Scaleway API secret key (sensitive; wire from a vault)                                                 |
+| `projectId`    | yes         | —                          | Project ID that owns the filesystem                                                                    |
+| `region`       | no          | `fr-par`                   | Region (`fr-par`, `nl-ams`, `pl-waw`)                                                                  |
+| `filesystemId` | conditional | —                          | ID of the filesystem this model manages. Required by every method except `create`, which provisions it |
+| `endpoint`     | no          | `https://api.scaleway.com` | Override the API host                                                                                  |
 
 ## Development
 

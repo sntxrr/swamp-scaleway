@@ -2,7 +2,8 @@
 
 A [swamp](https://swamp-club.com) model for a **Scaleway Container Registry
 namespace** — one model instance per namespace, keyed by its namespace ID. Wraps
-the [Scaleway Container Registry API](https://www.scaleway.com/en/developers/api/registry/)
+the
+[Scaleway Container Registry API](https://www.scaleway.com/en/developers/api/registry/)
 (`/registry/v1`, regional) using only Deno's built-in `fetch` — no SDK.
 Authenticated with the `X-Auth-Token` header (secret key wired from a vault). A
 namespace is a collection of container images sharing a unique identifier.
@@ -10,7 +11,7 @@ namespace is a collection of container images sharing a unique identifier.
 ## Methods
 
 | Method   | What it does                                                              |
-| -------- | ------------------------------------------------------------------------ |
+| -------- | ------------------------------------------------------------------------- |
 | `sync`   | Fetch the namespace's current state (`GetNamespace`) and store a snapshot |
 | `create` | Provision a new namespace (`CreateNamespace`) and snapshot it             |
 | `update` | Mutate mutable fields — description, visibility (`UpdateNamespace`)       |
@@ -60,13 +61,13 @@ the settled `ready` state.
 
 ## Global arguments
 
-| Arg           | Required | Default                    | Description                                            |
-| ------------- | -------- | -------------------------- | ------------------------------------------------------ |
-| `secretKey`   | yes      | —                          | Scaleway API secret key (sensitive; wire from a vault) |
-| `projectId`   | yes      | —                          | Project ID that owns the namespace                     |
-| `region`      | no       | `fr-par`                   | Region (`fr-par`, `nl-ams`, `pl-waw`)                  |
-| `namespaceId` | yes      | —                          | ID of the registry namespace this model manages        |
-| `endpoint`    | no       | `https://api.scaleway.com` | Override the API host                                  |
+| Arg           | Required    | Default                    | Description                                                                                                    |
+| ------------- | ----------- | -------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| `secretKey`   | yes         | —                          | Scaleway API secret key (sensitive; wire from a vault)                                                         |
+| `projectId`   | yes         | —                          | Project ID that owns the namespace                                                                             |
+| `region`      | no          | `fr-par`                   | Region (`fr-par`, `nl-ams`, `pl-waw`)                                                                          |
+| `namespaceId` | conditional | —                          | ID of the registry namespace this model manages. Required by every method except `create`, which provisions it |
+| `endpoint`    | no          | `https://api.scaleway.com` | Override the API host                                                                                          |
 
 ## Development
 

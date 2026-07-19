@@ -12,7 +12,7 @@ credentials.
 ## Methods
 
 | Method   | What it does                                                              |
-| -------- | ------------------------------------------------------------------------ |
+| -------- | ------------------------------------------------------------------------- |
 | `sync`   | Fetch the account's current state (`GetNatsAccount`) and store a snapshot |
 | `create` | Provision a new NATS account (`CreateNatsAccount`) and snapshot it        |
 | `update` | Mutate mutable fields — name (`UpdateNatsAccount`, PATCH)                 |
@@ -28,7 +28,7 @@ metadata (id, name, connection `endpoint`, project, timestamps).
 
 **NATS credentials** (the private credential material returned by
 `CreateNatsCredentials`) are a distinct secret-bearing operation and are
-intentionally **out of scope for this version** — see *Future work* below.
+intentionally **out of scope for this version** — see _Future work_ below.
 
 ## Setup
 
@@ -61,13 +61,13 @@ is treated as success and records an `absent` snapshot.
 
 ## Global arguments
 
-| Arg             | Required | Default                    | Description                                            |
-| --------------- | -------- | -------------------------- | ------------------------------------------------------ |
-| `secretKey`     | yes      | —                          | Scaleway API secret key (sensitive; wire from a vault) |
-| `projectId`     | yes      | —                          | Project ID that owns the NATS account                  |
-| `region`        | no       | `fr-par`                   | Region (`fr-par`, `nl-ams`, `pl-waw`)                  |
-| `natsAccountId` | yes      | —                          | ID of the NATS account this model manages              |
-| `endpoint`      | no       | `https://api.scaleway.com` | Override the API host                                  |
+| Arg             | Required    | Default                    | Description                                                                                              |
+| --------------- | ----------- | -------------------------- | -------------------------------------------------------------------------------------------------------- |
+| `secretKey`     | yes         | —                          | Scaleway API secret key (sensitive; wire from a vault)                                                   |
+| `projectId`     | yes         | —                          | Project ID that owns the NATS account                                                                    |
+| `region`        | no          | `fr-par`                   | Region (`fr-par`, `nl-ams`, `pl-waw`)                                                                    |
+| `natsAccountId` | conditional | —                          | ID of the NATS account this model manages. Required by every method except `create`, which provisions it |
+| `endpoint`      | no          | `https://api.scaleway.com` | Override the API host                                                                                    |
 
 ## Future work
 

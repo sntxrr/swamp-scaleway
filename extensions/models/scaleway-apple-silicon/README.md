@@ -88,13 +88,13 @@ observe the settled state.
 
 ## Global arguments
 
-| Arg         | Required | Default                    | Description                                                  |
-| ----------- | -------- | -------------------------- | ------------------------------------------------------------ |
-| `secretKey` | yes      | —                          | Scaleway API secret key (sensitive; wire from a vault)       |
-| `projectId` | yes      | —                          | Project ID that owns the server                              |
-| `zone`      | no       | `fr-par-1`                 | Availability zone (`fr-par-1`, `fr-par-3` for Apple silicon) |
-| `serverId`  | yes      | —                          | ID of the Apple silicon server this model manages            |
-| `endpoint`  | no       | `https://api.scaleway.com` | Override the API host                                        |
+| Arg         | Required    | Default                    | Description                                                                                                      |
+| ----------- | ----------- | -------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| `secretKey` | yes         | —                          | Scaleway API secret key (sensitive; wire from a vault)                                                           |
+| `projectId` | yes         | —                          | Project ID that owns the server                                                                                  |
+| `zone`      | no          | `fr-par-1`                 | Availability zone (`fr-par-1`, `fr-par-3` for Apple silicon)                                                     |
+| `serverId`  | conditional | —                          | ID of the Apple silicon server this model manages. Required by every method except `create`, which provisions it |
+| `endpoint`  | no          | `https://api.scaleway.com` | Override the API host                                                                                            |
 
 ## Development
 

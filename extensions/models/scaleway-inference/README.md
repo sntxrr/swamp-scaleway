@@ -10,13 +10,13 @@ deployment serves a dedicated model behind one or more endpoints.
 
 ## Methods
 
-| Method   | What it does                                                              |
-| -------- | ------------------------------------------------------------------------ |
-| `sync`   | Fetch the deployment's current state (`GetDeployment`) and store a snapshot |
-| `create` | Provision a new deployment (`CreateDeployment`) and snapshot it           |
+| Method   | What it does                                                                            |
+| -------- | --------------------------------------------------------------------------------------- |
+| `sync`   | Fetch the deployment's current state (`GetDeployment`) and store a snapshot             |
+| `create` | Provision a new deployment (`CreateDeployment`) and snapshot it                         |
 | `update` | Mutate mutable fields — name, tags, pool size, model, quantization (`UpdateDeployment`) |
-| `delete` | Deprovision the deployment (`DeleteDeployment`)                          |
-| `list`   | Factory discovery — snapshot every deployment in the region (paginated)   |
+| `delete` | Deprovision the deployment (`DeleteDeployment`)                                         |
+| `list`   | Factory discovery — snapshot every deployment in the region (paginated)                 |
 
 ## Secret handling
 
@@ -61,28 +61,28 @@ observe the settled `ready` state.
 
 ## Global arguments
 
-| Arg            | Required | Default                    | Description                                              |
-| -------------- | -------- | -------------------------- | -------------------------------------------------------- |
-| `secretKey`    | yes      | —                          | Scaleway API secret key (sensitive; wire from a vault)   |
-| `projectId`    | yes      | —                          | Project ID that owns the deployment                      |
-| `region`       | no       | `fr-par`                   | Region (`fr-par`, `nl-ams`, `pl-waw`)                    |
-| `deploymentId` | yes      | —                          | ID of the inference deployment this model manages        |
-| `endpoint`     | no       | `https://api.scaleway.com` | Override the API host                                    |
+| Arg            | Required    | Default                    | Description                                                                                                      |
+| -------------- | ----------- | -------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| `secretKey`    | yes         | —                          | Scaleway API secret key (sensitive; wire from a vault)                                                           |
+| `projectId`    | yes         | —                          | Project ID that owns the deployment                                                                              |
+| `region`       | no          | `fr-par`                   | Region (`fr-par`, `nl-ams`, `pl-waw`)                                                                            |
+| `deploymentId` | conditional | —                          | ID of the inference deployment this model manages. Required by every method except `create`, which provisions it |
+| `endpoint`     | no          | `https://api.scaleway.com` | Override the API host                                                                                            |
 
 ## create inputs
 
-| Input              | Required | Description                                                        |
-| ------------------ | -------- | ------------------------------------------------------------------ |
-| `name`             | yes      | Name of the new deployment                                         |
-| `modelId`          | yes      | UUID of the model to deploy (from the Managed Inference catalog)   |
-| `nodeType`         | yes      | Node type name, e.g. `L4`, `H100` (sent as `node_type_name`)       |
-| `acceptEula`       | no       | Accept the model's EULA if it requires one (default `false`)       |
-| `minSize`/`maxSize`| no       | Serving pool size (currently must be equal — no autoscaling)       |
-| `publicEndpoint`   | no       | Create a public endpoint (default `true`)                          |
-| `privateNetworkId` | no       | Also create a private endpoint on this Private Network             |
-| `disableAuth`      | no       | Disable IAM auth on the endpoint(s) (default `false`)              |
-| `quantizationBits` | no       | Quantize each model parameter to this many bits                    |
-| `tags`             | no       | Tags to attach to the deployment                                   |
+| Input               | Required | Description                                                      |
+| ------------------- | -------- | ---------------------------------------------------------------- |
+| `name`              | yes      | Name of the new deployment                                       |
+| `modelId`           | yes      | UUID of the model to deploy (from the Managed Inference catalog) |
+| `nodeType`          | yes      | Node type name, e.g. `L4`, `H100` (sent as `node_type_name`)     |
+| `acceptEula`        | no       | Accept the model's EULA if it requires one (default `false`)     |
+| `minSize`/`maxSize` | no       | Serving pool size (currently must be equal — no autoscaling)     |
+| `publicEndpoint`    | no       | Create a public endpoint (default `true`)                        |
+| `privateNetworkId`  | no       | Also create a private endpoint on this Private Network           |
+| `disableAuth`       | no       | Disable IAM auth on the endpoint(s) (default `false`)            |
+| `quantizationBits`  | no       | Quantize each model parameter to this many bits                  |
+| `tags`              | no       | Tags to attach to the deployment                                 |
 
 ## Development
 

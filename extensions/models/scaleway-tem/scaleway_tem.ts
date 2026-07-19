@@ -26,8 +26,10 @@ const GlobalArgsSchema = z.object({
   region: z.string().default("fr-par").describe(
     "Region, e.g. fr-par, nl-ams, pl-waw.",
   ),
-  domainId: z.string().describe(
-    "ID of the Transactional Email domain this model manages.",
+  domainId: z.string().optional().describe(
+    "ID of the Transactional Email domain this model manages. Optional — " +
+      "`create` registers a new domain and returns its ID; every other method " +
+      "requires it.",
   ),
   endpoint: z.string().optional().describe(
     "Override the API host. Defaults to https://api.scaleway.com.",
@@ -205,7 +207,10 @@ function toDomainResource(
   observedAt: string,
 ): Record<string, unknown> {
   return {
-    id: (d.id as string) ?? g.domainId,
+    // Callers always supply an id: API responses carry one, and the delete
+    // path passes the guarded domainId. The final "" is unreachable defensive
+    // padding so the snapshot still satisfies DomainSchema's required id.
+    id: (d.id as string) ?? g.domainId ?? "",
     domainName: (d.domain_name as string) ?? (d.name as string) ?? null,
     status: (d.status as string) ?? "unknown",
     projectId: (d.project_id as string) ?? null,
@@ -255,11 +260,31 @@ const domainsPath = (g: GlobalArgs): string =>
 const emailsPath = (g: GlobalArgs): string =>
   `/transactional-email/v1alpha1/regions/${g.region}/emails`;
 
+/**
+ * Resolve the managed domain ID for methods that act on an *existing* domain.
+ *
+ * `domainId` is optional in the global schema because `create` registers the
+ * domain and learns its ID from the API — requiring it up front would force
+ * callers to pass a throwaway placeholder just to satisfy validation. Methods
+ * that read or mutate an existing domain call this to fail fast with an
+ * actionable message.
+ */
+function requireDomainId(g: GlobalArgs, method: string): string {
+  if (!g.domainId) {
+    throw new Error(
+      `The "${method}" method requires globalArgs.domainId — the ID of an ` +
+        `existing Transactional Email domain. Set domainId on the model, or ` +
+        `run "create" first to register one.`,
+    );
+  }
+  return g.domainId;
+}
+
 // --- Model -----------------------------------------------------------------
 /** Scaleway Transactional Email model — one instance per sending domain, keyed by domainId. */
 export const model = {
   type: "@sntxrr/scaleway-tem",
-  version: "2026.07.18.2",
+  version: "2026.07.19.1",
   globalArguments: GlobalArgsSchema,
   resources: {
     "domain": {
@@ -308,18 +333,19 @@ export const model = {
         context: ExecuteContext,
       ): Promise<{ dataHandles: Array<{ name: string }> }> => {
         const { globalArgs: g, logger } = context;
-        logger.info("Syncing Scaleway TEM domain {id}", { id: g.domainId });
+        const domainId = requireDomainId(g, "sync");
+        logger.info("Syncing Scaleway TEM domain {id}", { id: domainId });
         const res = await scalewayFetch<Record<string, unknown>>(
           g,
           "GET",
-          `${domainsPath(g)}/${encodeURIComponent(g.domainId)}`,
+          `${domainsPath(g)}/${encodeURIComponent(domainId)}`,
         );
         const handle = await context.writeResource(
           "domain",
-          g.domainId,
+          domainId,
           toDomainResource(res, g, new Date().toISOString()),
         );
-        logger.info("Synced Scaleway TEM domain {id}", { id: g.domainId });
+        logger.info("Synced Scaleway TEM domain {id}", { id: domainId });
         return { dataHandles: [handle] };
       },
     },
@@ -348,7 +374,10 @@ export const model = {
           domainsPath(g),
           body,
         );
-        const newId = (res.id as string) ?? g.domainId;
+        // CreateDomain always returns the new ID; fall back to a preset
+        // domainId only if the caller pinned one, so create never depends on
+        // it being set.
+        const newId = (res.id as string) ?? g.domainId ?? "";
         const handle = await context.writeResource(
           "domain",
           newId,
@@ -370,7 +399,8 @@ export const model = {
         context: ExecuteContext,
       ): Promise<{ dataHandles: Array<{ name: string }> }> => {
         const { globalArgs: g, logger } = context;
-        logger.info("Deleting Scaleway TEM domain {id}", { id: g.domainId });
+        const domainId = requireDomainId(g, "delete");
+        logger.info("Deleting Scaleway TEM domain {id}", { id: domainId });
         // Idempotent delete: a 404 means the domain is already gone — treat it
         // as success and record an absent snapshot (CONVENTIONS.md §3.2).
         // Scaleway TEM deletes via POST .../domains/{id}/delete (not DELETE).
@@ -380,7 +410,7 @@ export const model = {
           res = await scalewayFetch<Record<string, unknown>>(
             g,
             "POST",
-            `${domainsPath(g)}/${encodeURIComponent(g.domainId)}/delete`,
+            `${domainsPath(g)}/${encodeURIComponent(domainId)}/delete`,
           );
         } catch (e) {
           if ((e as { status?: number }).status !== 404) throw e;
@@ -389,18 +419,18 @@ export const model = {
         const observedAt = new Date().toISOString();
         const snapshot = absent
           ? toDomainResource(
-            { id: g.domainId, status: "revoked" },
+            { id: domainId, status: "revoked" },
             g,
             observedAt,
           )
-          : toDomainResource(res ?? { id: g.domainId }, g, observedAt);
+          : toDomainResource(res ?? { id: domainId }, g, observedAt);
         const handle = await context.writeResource(
           "domain",
-          g.domainId,
+          domainId,
           snapshot,
         );
         logger.info("Deleted Scaleway TEM domain {id} (absent={absent})", {
-          id: g.domainId,
+          id: domainId,
           absent,
         });
         return { dataHandles: [handle] };

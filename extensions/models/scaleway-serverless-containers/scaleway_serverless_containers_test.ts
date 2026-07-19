@@ -18,7 +18,7 @@ const G = {
 
 // deno-lint-ignore no-explicit-any
 type AnyCtx = any;
-function makeContext(overrides: Record<string, unknown> = {}): {
+function makeContext(globalArgs: Record<string, unknown> = G): {
   ctx: AnyCtx;
   writes: Array<{ spec: string; name: string; data: Record<string, unknown> }>;
 } {
@@ -26,7 +26,7 @@ function makeContext(overrides: Record<string, unknown> = {}): {
     { spec: string; name: string; data: Record<string, unknown> }
   > = [];
   const ctx = {
-    globalArgs: { ...G, ...overrides },
+    globalArgs,
     logger: { info: () => {}, warn: () => {} },
     writeResource: (
       spec: string,
@@ -149,7 +149,7 @@ Deno.test("create POSTs the container body with namespace_id and snapshots the r
 });
 
 Deno.test("create without a namespaceId throws and writes nothing", async () => {
-  const { ctx, writes } = makeContext({ namespaceId: undefined });
+  const { ctx, writes } = makeContext({ ...G, namespaceId: undefined });
   let threw = false;
   await withMockedFetch(
     () => new Response(JSON.stringify({}), { status: 200 }),
@@ -251,7 +251,7 @@ Deno.test("delete treats a 404 as success and writes an absent snapshot", async 
 });
 
 Deno.test("list aggregates container pages until total_count is reached", async () => {
-  const { ctx, writes } = makeContext({ namespaceId: undefined });
+  const { ctx, writes } = makeContext({ ...G, namespaceId: undefined });
   await withMockedFetch(
     (url) => {
       const page = new URL(url).searchParams.get("page");
@@ -347,3 +347,56 @@ Deno.test("containersPath and namespacesPath are regional", () => {
     "/containers/v1beta1/regions/fr-par/namespaces",
   );
 });
+
+// --- containerId is optional: create provisions it, others require it -------
+
+Deno.test("create works with no containerId set (no placeholder needed)", async () => {
+  const { containerId: _omitted, ...noId } = G;
+  const { ctx, writes } = makeContext(noId);
+  await withMockedFetch(
+    () =>
+      new Response(
+        JSON.stringify({
+          id: "55555555-5555-5555-5555-555555555555",
+          name: "provisioned",
+          namespace_id: G.namespaceId,
+          status: "creating",
+          region: "fr-par",
+        }),
+        { status: 200 },
+      ),
+    () => model.methods.create.execute({ name: "provisioned" }, ctx),
+  );
+  // The new ID comes from the API response, not from a preset globalArg.
+  assertEquals(writes[0].name, "55555555-5555-5555-5555-555555555555");
+  assertEquals(writes[0].data.id, "55555555-5555-5555-5555-555555555555");
+  assertEquals(writes[0].data.name, "provisioned");
+});
+
+for (const method of ["sync", "update", "delete", "action"] as const) {
+  Deno.test(`${method} fails fast with an actionable error when containerId is absent`, async () => {
+    const { containerId: _omitted, ...noId } = G;
+    const { ctx, writes } = makeContext(noId);
+    let fetched = false;
+    const err = await withMockedFetch(
+      () => {
+        fetched = true;
+        return new Response("{}", { status: 200 });
+      },
+      async () => {
+        try {
+          await model.methods[method].execute({}, ctx);
+          return null;
+        } catch (e) {
+          return e as Error;
+        }
+      },
+    );
+    assert(err !== null, `${method} should throw when containerId is missing`);
+    assertStringIncludes(err.message, "containerId");
+    assertStringIncludes(err.message, method);
+    // Guard runs before any network call or write.
+    assertEquals(fetched, false);
+    assertEquals(writes.length, 0);
+  });
+}

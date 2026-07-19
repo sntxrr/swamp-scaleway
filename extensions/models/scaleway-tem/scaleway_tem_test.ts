@@ -16,7 +16,7 @@ const G = {
 
 // deno-lint-ignore no-explicit-any
 type AnyCtx = any;
-function makeContext(): {
+function makeContext(globalArgs: Record<string, unknown> = G): {
   ctx: AnyCtx;
   writes: Array<{ spec: string; name: string; data: Record<string, unknown> }>;
 } {
@@ -24,7 +24,7 @@ function makeContext(): {
     { spec: string; name: string; data: Record<string, unknown> }
   > = [];
   const ctx = {
-    globalArgs: G,
+    globalArgs,
     logger: { info: () => {}, warn: () => {} },
     writeResource: (
       spec: string,
@@ -256,3 +256,60 @@ Deno.test("domainsPath and emailsPath are regional", () => {
     "/transactional-email/v1alpha1/regions/fr-par/emails",
   );
 });
+
+// --- domainId is optional: create provisions it, other methods require it ---
+
+Deno.test("create works with no domainId set (no placeholder needed)", async () => {
+  const { domainId: _omitted, ...noId } = G;
+  const { ctx, writes } = makeContext(noId);
+  await withMockedFetch(
+    () =>
+      new Response(
+        JSON.stringify({
+          id: "55555555-5555-5555-5555-555555555555",
+          domain_name: "mail.example.com",
+          status: "unchecked",
+          region: "fr-par",
+          project_id: G.projectId,
+        }),
+        { status: 200 },
+      ),
+    () =>
+      model.methods.create.execute({
+        domainName: "mail.example.com",
+        acceptTos: true,
+      }, ctx),
+  );
+  // The registered ID comes from the API response, not from a preset globalArg.
+  assertEquals(writes[0].name, "55555555-5555-5555-5555-555555555555");
+  assertEquals(writes[0].data.id, "55555555-5555-5555-5555-555555555555");
+  assertEquals(writes[0].data.domainName, "mail.example.com");
+});
+
+for (const method of ["sync", "delete"] as const) {
+  Deno.test(`${method} fails fast with an actionable error when domainId is absent`, async () => {
+    const { domainId: _omitted, ...noId } = G;
+    const { ctx, writes } = makeContext(noId);
+    let fetched = false;
+    const err = await withMockedFetch(
+      () => {
+        fetched = true;
+        return new Response("{}", { status: 200 });
+      },
+      async () => {
+        try {
+          await model.methods[method].execute({}, ctx);
+          return null;
+        } catch (e) {
+          return e as Error;
+        }
+      },
+    );
+    assert(err !== null, `${method} should throw when domainId is missing`);
+    assertStringIncludes(err.message, "domainId");
+    assertStringIncludes(err.message, method);
+    // Guard runs before any network call or write.
+    assertEquals(fetched, false);
+    assertEquals(writes.length, 0);
+  });
+}

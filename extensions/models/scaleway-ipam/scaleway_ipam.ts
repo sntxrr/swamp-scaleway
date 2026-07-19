@@ -25,8 +25,9 @@ const GlobalArgsSchema = z.object({
   region: z.string().default("fr-par").describe(
     "Region, e.g. fr-par, nl-ams, pl-waw.",
   ),
-  ipId: z.string().describe(
-    "ID of the managed IP address this model manages.",
+  ipId: z.string().optional().describe(
+    "ID of the managed IP address this model manages. Optional — `create` " +
+      "books a new IP and returns its ID; every other method requires it.",
   ),
   endpoint: z.string().optional().describe(
     "Override the API host. Defaults to https://api.scaleway.com.",
@@ -212,7 +213,10 @@ function toIpResource(
 ): Record<string, unknown> {
   const resource = i.resource as Record<string, unknown> | null | undefined;
   return {
-    id: (i.id as string) ?? g.ipId,
+    // Callers always supply an id: API responses carry one, and the delete
+    // path passes the guarded ipId. The final "" is unreachable defensive
+    // padding so the snapshot still satisfies IpSchema's required id.
+    id: (i.id as string) ?? g.ipId ?? "",
     address: (i.address as string) ?? null,
     isIpv6: (i.is_ipv6 as boolean) ?? null,
     region: (i.region as string) ?? g.region,
@@ -230,11 +234,29 @@ function toIpResource(
 
 const ipsPath = (g: GlobalArgs): string => `/ipam/v1/regions/${g.region}/ips`;
 
+/**
+ * Resolve the managed IP ID for methods that act on an *existing* IP.
+ *
+ * `ipId` is optional in the global schema because `create` books the IP and
+ * learns its ID from the API — requiring it up front would force callers to
+ * pass a throwaway placeholder just to satisfy validation. Methods that read or
+ * mutate an existing IP call this to fail fast with an actionable message.
+ */
+function requireIpId(g: GlobalArgs, method: string): string {
+  if (!g.ipId) {
+    throw new Error(
+      `The "${method}" method requires globalArgs.ipId — the ID of an existing ` +
+        `IP address. Set ipId on the model, or run "create" first to book one.`,
+    );
+  }
+  return g.ipId;
+}
+
 // --- Model -----------------------------------------------------------------
 /** Scaleway IPAM model — one instance per managed IP address, keyed by ipId. */
 export const model = {
   type: "@sntxrr/scaleway-ipam",
-  version: "2026.07.18.1",
+  version: "2026.07.19.1",
   globalArguments: GlobalArgsSchema,
   resources: {
     "ip": {
@@ -277,18 +299,19 @@ export const model = {
         context: ExecuteContext,
       ): Promise<{ dataHandles: Array<{ name: string }> }> => {
         const { globalArgs: g, logger } = context;
-        logger.info("Syncing Scaleway IPAM IP {id}", { id: g.ipId });
+        const ipId = requireIpId(g, "sync");
+        logger.info("Syncing Scaleway IPAM IP {id}", { id: ipId });
         const res = await scalewayFetch<Record<string, unknown>>(
           g,
           "GET",
-          `${ipsPath(g)}/${encodeURIComponent(g.ipId)}`,
+          `${ipsPath(g)}/${encodeURIComponent(ipId)}`,
         );
         const handle = await context.writeResource(
           "ip",
-          g.ipId,
+          ipId,
           toIpResource(res, g, new Date().toISOString()),
         );
-        logger.info("Synced Scaleway IPAM IP {id}", { id: g.ipId });
+        logger.info("Synced Scaleway IPAM IP {id}", { id: ipId });
         return { dataHandles: [handle] };
       },
     },
@@ -316,7 +339,9 @@ export const model = {
           ipsPath(g),
           body,
         );
-        const newId = (res.id as string) ?? g.ipId;
+        // BookIP always returns the new ID; fall back to a preset ipId only if
+        // the caller pinned one, so create never depends on it being set.
+        const newId = (res.id as string) ?? g.ipId ?? "";
         const handle = await context.writeResource(
           "ip",
           newId,
@@ -338,22 +363,23 @@ export const model = {
         context: ExecuteContext,
       ): Promise<{ dataHandles: Array<{ name: string }> }> => {
         const { globalArgs: g, logger } = context;
-        logger.info("Updating Scaleway IPAM IP {id}", { id: g.ipId });
+        const ipId = requireIpId(g, "update");
+        logger.info("Updating Scaleway IPAM IP {id}", { id: ipId });
         const body: Record<string, unknown> = {};
         if (args.tags !== undefined) body.tags = args.tags;
         if (args.reverses !== undefined) body.reverses = args.reverses;
         const res = await scalewayFetch<Record<string, unknown>>(
           g,
           "PATCH",
-          `${ipsPath(g)}/${encodeURIComponent(g.ipId)}`,
+          `${ipsPath(g)}/${encodeURIComponent(ipId)}`,
           body,
         );
         const handle = await context.writeResource(
           "ip",
-          g.ipId,
+          ipId,
           toIpResource(res, g, new Date().toISOString()),
         );
-        logger.info("Updated Scaleway IPAM IP {id}", { id: g.ipId });
+        logger.info("Updated Scaleway IPAM IP {id}", { id: ipId });
         return { dataHandles: [handle] };
       },
     },
@@ -365,7 +391,8 @@ export const model = {
         context: ExecuteContext,
       ): Promise<{ dataHandles: Array<{ name: string }> }> => {
         const { globalArgs: g, logger } = context;
-        logger.info("Releasing Scaleway IPAM IP {id}", { id: g.ipId });
+        const ipId = requireIpId(g, "delete");
+        logger.info("Releasing Scaleway IPAM IP {id}", { id: ipId });
         // Idempotent delete: a 404 means the IP is already released — treat it
         // as success and record an absent snapshot (CONVENTIONS.md §3.2).
         let res: Record<string, unknown> | undefined;
@@ -374,7 +401,7 @@ export const model = {
           res = await scalewayFetch<Record<string, unknown>>(
             g,
             "DELETE",
-            `${ipsPath(g)}/${encodeURIComponent(g.ipId)}`,
+            `${ipsPath(g)}/${encodeURIComponent(ipId)}`,
           );
         } catch (e) {
           if ((e as { status?: number }).status !== 404) throw e;
@@ -382,11 +409,11 @@ export const model = {
         }
         const observedAt = new Date().toISOString();
         const snapshot = absent
-          ? { ...toIpResource({ id: g.ipId }, g, observedAt), absent: true }
-          : toIpResource(res ?? { id: g.ipId }, g, observedAt);
-        const handle = await context.writeResource("ip", g.ipId, snapshot);
+          ? { ...toIpResource({ id: ipId }, g, observedAt), absent: true }
+          : toIpResource(res ?? { id: ipId }, g, observedAt);
+        const handle = await context.writeResource("ip", ipId, snapshot);
         logger.info("Released Scaleway IPAM IP {id} (absent={absent})", {
-          id: g.ipId,
+          id: ipId,
           absent,
         });
         return { dataHandles: [handle] };

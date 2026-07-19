@@ -11,15 +11,15 @@ with the `X-Auth-Token` header (secret key wired from a vault).
 
 ## Methods
 
-| Method           | What it does                                                                  |
-| ---------------- | ---------------------------------------------------------------------------- |
-| `sync`           | Fetch the Load Balancer's current state (`GetLb`) and store a snapshot        |
-| `create`         | Provision a new Load Balancer (`CreateLb`) and snapshot it (including its ID) |
+| Method           | What it does                                                                   |
+| ---------------- | ------------------------------------------------------------------------------ |
+| `sync`           | Fetch the Load Balancer's current state (`GetLb`) and store a snapshot         |
+| `create`         | Provision a new Load Balancer (`CreateLb`) and snapshot it (including its ID)  |
 | `update`         | Update the Load Balancer's `name`, `description`, or `tags` (`UpdateLb`)       |
 | `delete`         | Deprovision the Load Balancer (`DeleteLb`); optionally release its flexible IP |
-| `list`           | Factory discovery — snapshot every Load Balancer in the zone (paginated)      |
-| `list-backends`  | Factory discovery — snapshot every backend attached to this LB (paginated)    |
-| `list-frontends` | Factory discovery — snapshot every frontend attached to this LB (paginated)   |
+| `list`           | Factory discovery — snapshot every Load Balancer in the zone (paginated)       |
+| `list-backends`  | Factory discovery — snapshot every backend attached to this LB (paginated)     |
+| `list-frontends` | Factory discovery — snapshot every frontend attached to this LB (paginated)    |
 
 ## Setup
 
@@ -54,13 +54,13 @@ provisioning is asynchronous — `create` returns a transient status (`pending`,
 
 ## Global arguments
 
-| Arg         | Required | Default                    | Description                                             |
-| ----------- | -------- | -------------------------- | ------------------------------------------------------- |
-| `secretKey` | yes      | —                          | Scaleway API secret key (sensitive; wire from a vault)  |
-| `projectId` | yes      | —                          | Project ID that owns the Load Balancer                  |
-| `zone`      | no       | `fr-par-1`                 | Availability zone (`fr-par-1`, `nl-ams-1`, `pl-waw-1`…) |
-| `lbId`      | yes      | —                          | ID of the Load Balancer this model manages              |
-| `endpoint`  | no       | `https://api.scaleway.com` | Override the API host                                   |
+| Arg         | Required    | Default                    | Description                                                                                               |
+| ----------- | ----------- | -------------------------- | --------------------------------------------------------------------------------------------------------- |
+| `secretKey` | yes         | —                          | Scaleway API secret key (sensitive; wire from a vault)                                                    |
+| `projectId` | yes         | —                          | Project ID that owns the Load Balancer                                                                    |
+| `zone`      | no          | `fr-par-1`                 | Availability zone (`fr-par-1`, `nl-ams-1`, `pl-waw-1`…)                                                   |
+| `lbId`      | conditional | —                          | ID of the Load Balancer this model manages. Required by every method except `create`, which provisions it |
+| `endpoint`  | no          | `https://api.scaleway.com` | Override the API host                                                                                     |
 
 ## Development
 

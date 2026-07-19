@@ -1,7 +1,7 @@
 manifestVersion: 1
 
 name: "@sntxrr/scaleway-rdb"
-version: "2026.07.18.1"
+version: "2026.07.19.1"
 description: "Manage a Scaleway Managed Database (RDB) instance — sync state, create, update, and delete PostgreSQL/MySQL instances, and discover instances in a region, via the RDB API with X-Auth-Token auth."
 repository: "https://github.com/sntxrr/swamp-scaleway"
 

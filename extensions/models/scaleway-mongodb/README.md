@@ -9,13 +9,13 @@ Authenticated with the `X-Auth-Token` header (secret key wired from a vault).
 
 ## Methods
 
-| Method   | What it does                                                             |
-| -------- | ------------------------------------------------------------------------ |
-| `sync`   | Fetch the instance's current state (`GetInstance`) and store a snapshot   |
+| Method   | What it does                                                               |
+| -------- | -------------------------------------------------------------------------- |
+| `sync`   | Fetch the instance's current state (`GetInstance`) and store a snapshot    |
 | `create` | Provision a new MongoDB® Database Instance (`CreateInstance`) and snapshot |
-| `update` | Mutate mutable fields — name, tags (`UpdateInstance`)                     |
-| `delete` | Deprovision the instance (`DeleteInstance`); idempotent (404 → absent)   |
-| `list`   | Factory discovery — snapshot every instance in the region (paginated)     |
+| `update` | Mutate mutable fields — name, tags (`UpdateInstance`)                      |
+| `delete` | Deprovision the instance (`DeleteInstance`); idempotent (404 → absent)     |
+| `list`   | Factory discovery — snapshot every instance in the region (paginated)      |
 
 ## Secret handling
 
@@ -57,13 +57,13 @@ to observe the settled `ready` state.
 
 ## Global arguments
 
-| Arg          | Required | Default                    | Description                                            |
-| ------------ | -------- | -------------------------- | ------------------------------------------------------ |
-| `secretKey`  | yes      | —                          | Scaleway API secret key (sensitive; wire from a vault) |
-| `projectId`  | yes      | —                          | Project ID that owns the instance                      |
-| `region`     | no       | `fr-par`                   | Region (`fr-par`, `nl-ams`, `pl-waw`)                  |
-| `instanceId` | yes      | —                          | ID of the MongoDB® instance this model manages         |
-| `endpoint`   | no       | `https://api.scaleway.com` | Override the API host                                  |
+| Arg          | Required    | Default                    | Description                                                                                                   |
+| ------------ | ----------- | -------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| `secretKey`  | yes         | —                          | Scaleway API secret key (sensitive; wire from a vault)                                                        |
+| `projectId`  | yes         | —                          | Project ID that owns the instance                                                                             |
+| `region`     | no          | `fr-par`                   | Region (`fr-par`, `nl-ams`, `pl-waw`)                                                                         |
+| `instanceId` | conditional | —                          | ID of the MongoDB® instance this model manages. Required by every method except `create`, which provisions it |
+| `endpoint`   | no          | `https://api.scaleway.com` | Override the API host                                                                                         |
 
 MongoDB® is currently offered in the `fr-par` region; `nl-ams` and `pl-waw` are
 accepted by the region policy check for parity with other Scaleway services.

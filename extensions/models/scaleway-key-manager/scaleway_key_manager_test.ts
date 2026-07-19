@@ -17,7 +17,7 @@ const G = {
 
 // deno-lint-ignore no-explicit-any
 type AnyCtx = any;
-function makeContext(): {
+function makeContext(globalArgs: Record<string, unknown> = G): {
   ctx: AnyCtx;
   writes: Array<{ spec: string; name: string; data: Record<string, unknown> }>;
   logs: string[];
@@ -30,7 +30,7 @@ function makeContext(): {
     logs.push(message + " " + JSON.stringify(props ?? {}));
   };
   const ctx = {
-    globalArgs: G,
+    globalArgs,
     logger: { info: record, warn: record },
     writeResource: (
       spec: string,
@@ -451,3 +451,77 @@ Deno.test("unprotect POSTs to the unprotect path and re-snapshots the key", asyn
   assertStringIncludes(call.url, `/keys/${G.keyId}/unprotect`);
   assertEquals(writes[0].spec, "key");
 });
+
+// --- keyId is optional: create provisions it, other methods require it ------
+
+Deno.test("create works with no keyId set (no placeholder needed)", async () => {
+  const { keyId: _omitted, ...noId } = G;
+  const { ctx, writes } = makeContext(noId);
+  await withMockedFetch(
+    () =>
+      new Response(
+        JSON.stringify({
+          id: "55555555-5555-5555-5555-555555555555",
+          name: "provisioned-key",
+          state: "enabled",
+          region: "fr-par",
+        }),
+        { status: 200 },
+      ),
+    () =>
+      model.methods.create.execute({
+        name: "provisioned-key",
+        usageSymmetricEncryption: "aes_256_gcm",
+        unprotected: false,
+      }, ctx),
+  );
+  // The new key ID comes from the API response, not from a preset globalArg.
+  assertEquals(writes[0].name, "55555555-5555-5555-5555-555555555555");
+  assertEquals(writes[0].data.id, "55555555-5555-5555-5555-555555555555");
+  assertEquals(writes[0].data.name, "provisioned-key");
+});
+
+/** Every method that operates on an existing key, with valid arguments. */
+const guardedMethods: Array<[string, (ctx: AnyCtx) => Promise<unknown>]> = [
+  ["sync", (ctx) => model.methods.sync.execute({}, ctx)],
+  ["delete", (ctx) => model.methods.delete.execute({}, ctx)],
+  [
+    "encrypt",
+    (ctx) => model.methods.encrypt.execute({ plaintext: "cGxhaW50ZXh0" }, ctx),
+  ],
+  [
+    "decrypt",
+    (ctx) => model.methods.decrypt.execute({ ciphertext: "Q0lQSA==" }, ctx),
+  ],
+  ["rotate", (ctx) => model.methods.rotate.execute({}, ctx)],
+  ["protect", (ctx) => model.methods.protect.execute({}, ctx)],
+  ["unprotect", (ctx) => model.methods.unprotect.execute({}, ctx)],
+];
+
+for (const [method, run] of guardedMethods) {
+  Deno.test(`${method} fails fast with an actionable error when keyId is absent`, async () => {
+    const { keyId: _omitted, ...noId } = G;
+    const { ctx, writes } = makeContext(noId);
+    let fetched = false;
+    const err = await withMockedFetch(
+      () => {
+        fetched = true;
+        return new Response("{}", { status: 200 });
+      },
+      async () => {
+        try {
+          await run(ctx);
+          return null;
+        } catch (e) {
+          return e as Error;
+        }
+      },
+    );
+    assert(err !== null, `${method} should throw when keyId is missing`);
+    assertStringIncludes(err.message, "keyId");
+    assertStringIncludes(err.message, method);
+    // Guard runs before any network call or write.
+    assertEquals(fetched, false);
+    assertEquals(writes.length, 0);
+  });
+}

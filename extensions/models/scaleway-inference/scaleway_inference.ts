@@ -27,8 +27,10 @@ const GlobalArgsSchema = z.object({
   region: z.string().default("fr-par").describe(
     "Region, e.g. fr-par, nl-ams, pl-waw.",
   ),
-  deploymentId: z.string().describe(
-    "ID of the Managed Inference deployment this model manages.",
+  deploymentId: z.string().optional().describe(
+    "ID of the Managed Inference deployment this model manages. Optional — " +
+      "`create` provisions a new deployment and returns its ID; every other " +
+      "method requires it.",
   ),
   endpoint: z.string().optional().describe(
     "Override the API host. Defaults to https://api.scaleway.com.",
@@ -271,7 +273,11 @@ function toDeploymentResource(
   });
   const quant = d.quantization as Record<string, unknown> | null | undefined;
   return {
-    id: (d.id as string) ?? g.deploymentId,
+    // Callers always supply an id: API responses carry one, and the delete
+    // path passes the guarded deploymentId. The final "" is unreachable
+    // defensive padding so the snapshot still satisfies DeploymentSchema's
+    // required id.
+    id: (d.id as string) ?? g.deploymentId ?? "",
     name: (d.name as string) ?? null,
     status: (d.status as string) ?? "unknown",
     modelId: (d.model_id as string) ?? null,
@@ -295,11 +301,32 @@ function toDeploymentResource(
 const deploymentsPath = (g: GlobalArgs): string =>
   `/inference/v1/regions/${g.region}/deployments`;
 
+/**
+ * Resolve the managed deployment ID for methods that act on an *existing*
+ * deployment.
+ *
+ * `deploymentId` is optional in the global schema because `create` provisions
+ * the deployment and learns its ID from the API — requiring it up front would
+ * force callers to pass a throwaway placeholder just to satisfy validation.
+ * Methods that read or mutate an existing deployment call this to fail fast
+ * with an actionable message.
+ */
+function requireDeploymentId(g: GlobalArgs, method: string): string {
+  if (!g.deploymentId) {
+    throw new Error(
+      `The "${method}" method requires globalArgs.deploymentId — the ID of an ` +
+        `existing inference deployment. Set deploymentId on the model, or run ` +
+        `"create" first to provision one.`,
+    );
+  }
+  return g.deploymentId;
+}
+
 // --- Model -----------------------------------------------------------------
 /** Scaleway Managed Inference model — one instance per deployment, keyed by deploymentId. */
 export const model = {
   type: "@sntxrr/scaleway-inference",
-  version: "2026.07.18.1",
+  version: "2026.07.19.1",
   globalArguments: GlobalArgsSchema,
   resources: {
     "deployment": {
@@ -342,21 +369,22 @@ export const model = {
         context: ExecuteContext,
       ): Promise<{ dataHandles: Array<{ name: string }> }> => {
         const { globalArgs: g, logger } = context;
+        const deploymentId = requireDeploymentId(g, "sync");
         logger.info("Syncing Scaleway inference deployment {id}", {
-          id: g.deploymentId,
+          id: deploymentId,
         });
         const res = await scalewayFetch<Record<string, unknown>>(
           g,
           "GET",
-          `${deploymentsPath(g)}/${encodeURIComponent(g.deploymentId)}`,
+          `${deploymentsPath(g)}/${encodeURIComponent(deploymentId)}`,
         );
         const handle = await context.writeResource(
           "deployment",
-          g.deploymentId,
+          deploymentId,
           toDeploymentResource(res, g, new Date().toISOString()),
         );
         logger.info("Synced Scaleway inference deployment {id}", {
-          id: g.deploymentId,
+          id: deploymentId,
         });
         return { dataHandles: [handle] };
       },
@@ -411,7 +439,10 @@ export const model = {
           deploymentsPath(g),
           body,
         );
-        const newId = (res.id as string) ?? g.deploymentId;
+        // CreateDeployment always returns the new ID; fall back to a preset
+        // deploymentId only if the caller pinned one, so create never depends
+        // on it being set.
+        const newId = (res.id as string) ?? g.deploymentId ?? "";
         const handle = await context.writeResource(
           "deployment",
           newId,
@@ -433,8 +464,9 @@ export const model = {
         context: ExecuteContext,
       ): Promise<{ dataHandles: Array<{ name: string }> }> => {
         const { globalArgs: g, logger } = context;
+        const deploymentId = requireDeploymentId(g, "update");
         logger.info("Updating Scaleway inference deployment {id}", {
-          id: g.deploymentId,
+          id: deploymentId,
         });
         const body: Record<string, unknown> = {};
         if (args.name !== undefined) body.name = args.name;
@@ -448,16 +480,16 @@ export const model = {
         const res = await scalewayFetch<Record<string, unknown>>(
           g,
           "PATCH",
-          `${deploymentsPath(g)}/${encodeURIComponent(g.deploymentId)}`,
+          `${deploymentsPath(g)}/${encodeURIComponent(deploymentId)}`,
           body,
         );
         const handle = await context.writeResource(
           "deployment",
-          g.deploymentId,
+          deploymentId,
           toDeploymentResource(res, g, new Date().toISOString()),
         );
         logger.info("Updated Scaleway inference deployment {id}", {
-          id: g.deploymentId,
+          id: deploymentId,
         });
         return { dataHandles: [handle] };
       },
@@ -470,8 +502,9 @@ export const model = {
         context: ExecuteContext,
       ): Promise<{ dataHandles: Array<{ name: string }> }> => {
         const { globalArgs: g, logger } = context;
+        const deploymentId = requireDeploymentId(g, "delete");
         logger.info("Deleting Scaleway inference deployment {id}", {
-          id: g.deploymentId,
+          id: deploymentId,
         });
         // Idempotent delete: a 404 means the deployment is already gone — treat
         // it as success and record an absent snapshot (CONVENTIONS.md §3.2).
@@ -481,7 +514,7 @@ export const model = {
           res = await scalewayFetch<Record<string, unknown>>(
             g,
             "DELETE",
-            `${deploymentsPath(g)}/${encodeURIComponent(g.deploymentId)}`,
+            `${deploymentsPath(g)}/${encodeURIComponent(deploymentId)}`,
           );
         } catch (e) {
           if ((e as { status?: number }).status !== 404) throw e;
@@ -490,19 +523,19 @@ export const model = {
         const observedAt = new Date().toISOString();
         const snapshot = absent
           ? toDeploymentResource(
-            { id: g.deploymentId, status: "absent" },
+            { id: deploymentId, status: "absent" },
             g,
             observedAt,
           )
-          : toDeploymentResource(res ?? { id: g.deploymentId }, g, observedAt);
+          : toDeploymentResource(res ?? { id: deploymentId }, g, observedAt);
         const handle = await context.writeResource(
           "deployment",
-          g.deploymentId,
+          deploymentId,
           snapshot,
         );
         logger.info(
           "Deleted Scaleway inference deployment {id} (absent={absent})",
-          { id: g.deploymentId, absent },
+          { id: deploymentId, absent },
         );
         return { dataHandles: [handle] };
       },

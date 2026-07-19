@@ -1,0 +1,109 @@
+id: 9cd88439-8af4-467b-bc86-9f9bd1c9134a
+name: a1-public-endpoint
+description: >-
+  Reserve a flexible IP (IPAM), attach a new Public Gateway to it, then publish
+  an A record pointing at the gateway's public IP. Demonstrates output->input
+  wiring: ipam.ip.id -> gateway.create(ipId), gateway.publicIp -> dns A record.
+tags: {}
+inputs:
+  properties:
+    projectId:
+      type: string
+      description: Scaleway Project ID that owns the IP, gateway, and DNS zone.
+    dnsZone:
+      type: string
+      description: DNS zone (domain) to publish into, e.g. example.com.
+    recordName:
+      type: string
+      default: "@"
+      description: Record name relative to the zone (e.g. gw, @ for apex).
+    region:
+      type: string
+      default: fr-par
+      description: IPAM region (must contain the gateway zone).
+    zone:
+      type: string
+      default: fr-par-1
+      description: Availability zone for the flexible IP and Public Gateway.
+    ttl:
+      type: integer
+      default: 300
+      description: TTL in seconds for the published A record.
+  required: ["projectId", "dnsZone"]
+jobs:
+  - name: main
+    description: Reserve IP -> attach gateway -> publish DNS (strict ordering).
+    steps:
+      - name: reserve-ip
+        description: Book a flexible IP from IPAM in the target zone.
+        task:
+          type: model_method
+          modelType: "@sntxrr/scaleway-ipam"
+          modelName: a1-ip
+          methodName: create
+          # Implicit routing: secretKey/projectId/region route to global args;
+          # source/isIpv6 route to the create method args. No ipId is passed —
+          # `create` books the IP and learns its ID from the API response.
+          inputs:
+            secretKey: ${{ vault.get(scaleway, SCW_SECRET_KEY) }}
+            projectId: ${{ inputs.projectId }}
+            region: ${{ inputs.region }}
+            source:
+              zonal: ${{ inputs.zone }}
+            isIpv6: false
+        dependsOn: []
+        weight: 0
+        allowFailure: false
+      - name: create-gateway
+        description: Provision a Public Gateway attached to the reserved IP.
+        task:
+          type: model_method
+          modelType: "@sntxrr/scaleway-public-gateway"
+          modelName: a1-gateway
+          methodName: create
+          # Implicit routing: secretKey/projectId/zone -> global args;
+          # name/ipId -> create method args. No gatewayId is passed — `create`
+          # provisions the gateway and learns its ID from the API response.
+          # The ipId below is the *IP* to attach, wired from the prior step.
+          inputs:
+            secretKey: ${{ vault.get(scaleway, SCW_SECRET_KEY) }}
+            projectId: ${{ inputs.projectId }}
+            zone: ${{ inputs.zone }}
+            name: a1-gateway
+            ipId: ${{ data.latest("a1-ip", "ip").attributes.id }}
+        dependsOn:
+          - step: reserve-ip
+            condition:
+              type: succeeded
+        weight: 0
+        allowFailure: false
+      - name: publish-dns
+        description: Publish an A record pointing at the gateway's public IP.
+        task:
+          type: model_method
+          modelType: "@sntxrr/scaleway-dns"
+          modelName: a1-dns
+          methodName: update
+          # Implicit routing: secretKey/projectId/dnsZone -> global args;
+          # changes/returnAllRecords -> update method args.
+          inputs:
+            secretKey: ${{ vault.get(scaleway, SCW_SECRET_KEY) }}
+            projectId: ${{ inputs.projectId }}
+            dnsZone: ${{ inputs.dnsZone }}
+            changes:
+              - add:
+                  records:
+                    - name: ${{ inputs.recordName }}
+                      type: A
+                      ttl: ${{ inputs.ttl }}
+                      data: ${{ data.latest("a1-gateway", "gateway").attributes.publicIp }}
+            returnAllRecords: true
+        dependsOn:
+          - step: create-gateway
+            condition:
+              type: succeeded
+        weight: 0
+        allowFailure: false
+    dependsOn: []
+    weight: 0
+version: 1

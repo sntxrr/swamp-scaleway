@@ -27,8 +27,10 @@ const GlobalArgsSchema = z.object({
   region: z.string().default("fr-par").describe(
     "Region, e.g. fr-par, nl-ams, pl-waw.",
   ),
-  functionId: z.string().describe(
-    "ID of the serverless function this model manages.",
+  functionId: z.string().optional().describe(
+    "ID of the serverless function this model manages. Optional — `create` " +
+      "provisions a new function and returns its ID; every other method " +
+      "requires it.",
   ),
   namespaceId: z.string().optional().describe(
     "ID of the namespace that owns the function (required for create; also " +
@@ -272,7 +274,11 @@ function toFunctionResource(
   observedAt: string,
 ): Record<string, unknown> {
   return {
-    id: (f.id as string) ?? g.functionId,
+    // Callers always supply an id: API responses carry one, and the delete
+    // path passes the guarded functionId. The final "" is unreachable
+    // defensive padding so the snapshot still satisfies the schema's required
+    // id.
+    id: (f.id as string) ?? g.functionId ?? "",
     name: (f.name as string) ?? null,
     namespaceId: (f.namespace_id as string) ?? g.namespaceId ?? null,
     status: (f.status as string) ?? "unknown",
@@ -322,11 +328,32 @@ const functionsPath = (g: GlobalArgs): string =>
 const namespacesPath = (g: GlobalArgs): string =>
   `/functions/v1beta1/regions/${g.region}/namespaces`;
 
+/**
+ * Resolve the managed function ID for methods that act on an *existing*
+ * function.
+ *
+ * `functionId` is optional in the global schema because `create` provisions the
+ * function and learns its ID from the API — requiring it up front would force
+ * callers to pass a throwaway placeholder just to satisfy validation. Methods
+ * that read or mutate an existing function call this to fail fast with an
+ * actionable message.
+ */
+function requireFunctionId(g: GlobalArgs, method: string): string {
+  if (!g.functionId) {
+    throw new Error(
+      `The "${method}" method requires globalArgs.functionId — the ID of an ` +
+        `existing function. Set functionId on the model, or run "create" ` +
+        `first to provision one.`,
+    );
+  }
+  return g.functionId;
+}
+
 // --- Model -----------------------------------------------------------------
 /** Scaleway Serverless Functions model — one instance per function, keyed by functionId. */
 export const model = {
   type: "@sntxrr/scaleway-serverless-functions",
-  version: "2026.07.18.2",
+  version: "2026.07.19.1",
   globalArguments: GlobalArgsSchema,
   resources: {
     "function": {
@@ -375,18 +402,19 @@ export const model = {
         context: ExecuteContext,
       ): Promise<{ dataHandles: Array<{ name: string }> }> => {
         const { globalArgs: g, logger } = context;
-        logger.info("Syncing Scaleway function {id}", { id: g.functionId });
+        const functionId = requireFunctionId(g, "sync");
+        logger.info("Syncing Scaleway function {id}", { id: functionId });
         const res = await scalewayFetch<Record<string, unknown>>(
           g,
           "GET",
-          `${functionsPath(g)}/${encodeURIComponent(g.functionId)}`,
+          `${functionsPath(g)}/${encodeURIComponent(functionId)}`,
         );
         const handle = await context.writeResource(
           "function",
-          g.functionId,
+          functionId,
           toFunctionResource(res, g, new Date().toISOString()),
         );
-        logger.info("Synced Scaleway function {id}", { id: g.functionId });
+        logger.info("Synced Scaleway function {id}", { id: functionId });
         return { dataHandles: [handle] };
       },
     },
@@ -437,7 +465,10 @@ export const model = {
           functionsPath(g),
           body,
         );
-        const newId = (res.id as string) ?? g.functionId;
+        // CreateFunction always returns the new ID; fall back to a preset
+        // functionId only if the caller pinned one, so create never depends on
+        // it being set.
+        const newId = (res.id as string) ?? g.functionId ?? "";
         const handle = await context.writeResource(
           "function",
           newId,
@@ -458,7 +489,8 @@ export const model = {
         context: ExecuteContext,
       ): Promise<{ dataHandles: Array<{ name: string }> }> => {
         const { globalArgs: g, logger } = context;
-        logger.info("Updating Scaleway function {id}", { id: g.functionId });
+        const functionId = requireFunctionId(g, "update");
+        logger.info("Updating Scaleway function {id}", { id: functionId });
         const body: Record<string, unknown> = {};
         if (args.runtime !== undefined) body.runtime = args.runtime;
         if (args.privacy !== undefined) body.privacy = args.privacy;
@@ -482,15 +514,15 @@ export const model = {
         const res = await scalewayFetch<Record<string, unknown>>(
           g,
           "PATCH",
-          `${functionsPath(g)}/${encodeURIComponent(g.functionId)}`,
+          `${functionsPath(g)}/${encodeURIComponent(functionId)}`,
           body,
         );
         const handle = await context.writeResource(
           "function",
-          g.functionId,
+          functionId,
           toFunctionResource(res, g, new Date().toISOString()),
         );
-        logger.info("Updated Scaleway function {id}", { id: g.functionId });
+        logger.info("Updated Scaleway function {id}", { id: functionId });
         return { dataHandles: [handle] };
       },
     },
@@ -504,22 +536,23 @@ export const model = {
         context: ExecuteContext,
       ): Promise<{ dataHandles: Array<{ name: string }> }> => {
         const { globalArgs: g, logger } = context;
+        const functionId = requireFunctionId(g, "action");
         logger.info("Function {id} action {op}", {
-          id: g.functionId,
+          id: functionId,
           op: args.op,
         });
         const res = await scalewayFetch<Record<string, unknown>>(
           g,
           "POST",
-          `${functionsPath(g)}/${encodeURIComponent(g.functionId)}/deploy`,
+          `${functionsPath(g)}/${encodeURIComponent(functionId)}/deploy`,
           {},
         );
         const handle = await context.writeResource(
           "function",
-          g.functionId,
+          functionId,
           toFunctionResource(res, g, new Date().toISOString()),
         );
-        logger.info("Function {id} deployed", { id: g.functionId });
+        logger.info("Function {id} deployed", { id: functionId });
         return { dataHandles: [handle] };
       },
     },
@@ -531,7 +564,8 @@ export const model = {
         context: ExecuteContext,
       ): Promise<{ dataHandles: Array<{ name: string }> }> => {
         const { globalArgs: g, logger } = context;
-        logger.info("Deleting Scaleway function {id}", { id: g.functionId });
+        const functionId = requireFunctionId(g, "delete");
+        logger.info("Deleting Scaleway function {id}", { id: functionId });
         // Idempotent delete: a 404 means the function is already gone — treat
         // it as success and record an absent snapshot (CONVENTIONS.md §3.2).
         let res: Record<string, unknown> | undefined;
@@ -540,7 +574,7 @@ export const model = {
           res = await scalewayFetch<Record<string, unknown>>(
             g,
             "DELETE",
-            `${functionsPath(g)}/${encodeURIComponent(g.functionId)}`,
+            `${functionsPath(g)}/${encodeURIComponent(functionId)}`,
           );
         } catch (e) {
           if ((e as { status?: number }).status !== 404) throw e;
@@ -549,18 +583,18 @@ export const model = {
         const observedAt = new Date().toISOString();
         const snapshot = absent
           ? toFunctionResource(
-            { id: g.functionId, status: "absent" },
+            { id: functionId, status: "absent" },
             g,
             observedAt,
           )
-          : toFunctionResource(res ?? { id: g.functionId }, g, observedAt);
+          : toFunctionResource(res ?? { id: functionId }, g, observedAt);
         const handle = await context.writeResource(
           "function",
-          g.functionId,
+          functionId,
           snapshot,
         );
         logger.info("Deleted Scaleway function {id} (absent={absent})", {
-          id: g.functionId,
+          id: functionId,
           absent,
         });
         return { dataHandles: [handle] };

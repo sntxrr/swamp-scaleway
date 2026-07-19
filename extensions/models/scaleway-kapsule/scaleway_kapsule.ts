@@ -31,8 +31,10 @@ const GlobalArgsSchema = z.object({
   region: z.string().default("fr-par").describe(
     "Region, e.g. fr-par, nl-ams, pl-waw.",
   ),
-  clusterId: z.string().describe(
-    "ID of the Kapsule cluster this model manages.",
+  clusterId: z.string().optional().describe(
+    "ID of the Kapsule cluster this model manages. Optional — `create` " +
+      "provisions a new cluster and returns its ID; every other method " +
+      "requires it.",
   ),
   endpoint: z.string().optional().describe(
     "Override the API host. Defaults to https://api.scaleway.com.",
@@ -274,7 +276,10 @@ function toClusterResource(
   observedAt: string,
 ): Record<string, unknown> {
   return {
-    id: (c.id as string) ?? g.clusterId,
+    // Callers always supply an id: API responses carry one, and the delete
+    // path passes the guarded clusterId. The final "" is unreachable defensive
+    // padding so the snapshot still satisfies ClusterSchema's required id.
+    id: (c.id as string) ?? g.clusterId ?? "",
     name: (c.name as string) ?? null,
     status: (c.status as string) ?? "unknown",
     version: (c.version as string) ?? null,
@@ -302,7 +307,9 @@ function toPoolResource(
     size: (p.size as number) ?? null,
     autoscaling: (p.autoscaling as boolean) ?? null,
     autohealing: (p.autohealing as boolean) ?? null,
-    clusterId: (p.cluster_id as string) ?? g.clusterId,
+    // list-pools guards clusterId before calling, so "" is unreachable
+    // defensive padding for PoolSchema's required clusterId.
+    clusterId: (p.cluster_id as string) ?? g.clusterId ?? "",
     observedAt,
   };
 }
@@ -317,7 +324,9 @@ function toKubeconfigResource(
   observedAt: string,
 ): Record<string, unknown> {
   return {
-    clusterId: g.clusterId,
+    // get-kubeconfig guards clusterId before calling, so "" is unreachable
+    // defensive padding for KubeconfigSchema's required clusterId.
+    clusterId: g.clusterId ?? "",
     name: (k.name as string) ?? null,
     type: (k.type as string) ?? null,
     content: (k.content as string) ?? "",
@@ -328,11 +337,31 @@ function toKubeconfigResource(
 const clustersPath = (g: GlobalArgs): string =>
   `/k8s/v1/regions/${g.region}/clusters`;
 
+/**
+ * Resolve the managed cluster ID for methods that act on an *existing* cluster.
+ *
+ * `clusterId` is optional in the global schema because `create` provisions the
+ * cluster and learns its ID from the API — requiring it up front would force
+ * callers to pass a throwaway placeholder just to satisfy validation. Methods
+ * that read or mutate an existing cluster call this to fail fast with an
+ * actionable message.
+ */
+function requireClusterId(g: GlobalArgs, method: string): string {
+  if (!g.clusterId) {
+    throw new Error(
+      `The "${method}" method requires globalArgs.clusterId — the ID of an ` +
+        `existing Kapsule cluster. Set clusterId on the model, or run ` +
+        `"create" first to provision one.`,
+    );
+  }
+  return g.clusterId;
+}
+
 // --- Model -----------------------------------------------------------------
 /** Scaleway Kapsule model — one instance per cluster, keyed by clusterId. */
 export const model = {
   type: "@sntxrr/scaleway-kapsule",
-  version: "2026.07.18.1",
+  version: "2026.07.19.1",
   globalArguments: GlobalArgsSchema,
   resources: {
     "cluster": {
@@ -388,21 +417,22 @@ export const model = {
         context: ExecuteContext,
       ): Promise<{ dataHandles: Array<{ name: string }> }> => {
         const { globalArgs: g, logger } = context;
+        const clusterId = requireClusterId(g, "sync");
         logger.info("Syncing Scaleway Kapsule cluster {id}", {
-          id: g.clusterId,
+          id: clusterId,
         });
         const res = await scalewayFetch<Record<string, unknown>>(
           g,
           "GET",
-          `${clustersPath(g)}/${encodeURIComponent(g.clusterId)}`,
+          `${clustersPath(g)}/${encodeURIComponent(clusterId)}`,
         );
         const handle = await context.writeResource(
           "cluster",
-          g.clusterId,
+          clusterId,
           toClusterResource(res, g, new Date().toISOString()),
         );
         logger.info("Synced Scaleway Kapsule cluster {id}", {
-          id: g.clusterId,
+          id: clusterId,
         });
         return { dataHandles: [handle] };
       },
@@ -447,7 +477,10 @@ export const model = {
           clustersPath(g),
           body,
         );
-        const newId = (res.id as string) ?? g.clusterId;
+        // CreateCluster always returns the new ID; fall back to a preset
+        // clusterId only if the caller pinned one, so create never depends on
+        // it being set.
+        const newId = (res.id as string) ?? g.clusterId ?? "";
         const handle = await context.writeResource(
           "cluster",
           newId,
@@ -468,8 +501,9 @@ export const model = {
         context: ExecuteContext,
       ): Promise<{ dataHandles: Array<{ name: string }> }> => {
         const { globalArgs: g, logger } = context;
+        const clusterId = requireClusterId(g, "update");
         logger.info("Updating Scaleway Kapsule cluster {id}", {
-          id: g.clusterId,
+          id: clusterId,
         });
         const body: Record<string, unknown> = {};
         if (args.name !== undefined) body.name = args.name;
@@ -478,16 +512,16 @@ export const model = {
         const res = await scalewayFetch<Record<string, unknown>>(
           g,
           "PATCH",
-          `${clustersPath(g)}/${encodeURIComponent(g.clusterId)}`,
+          `${clustersPath(g)}/${encodeURIComponent(clusterId)}`,
           body,
         );
         const handle = await context.writeResource(
           "cluster",
-          g.clusterId,
+          clusterId,
           toClusterResource(res, g, new Date().toISOString()),
         );
         logger.info("Updated Scaleway Kapsule cluster {id}", {
-          id: g.clusterId,
+          id: clusterId,
         });
         return { dataHandles: [handle] };
       },
@@ -501,23 +535,24 @@ export const model = {
         context: ExecuteContext,
       ): Promise<{ dataHandles: Array<{ name: string }> }> => {
         const { globalArgs: g, logger } = context;
+        const clusterId = requireClusterId(g, "upgrade");
         logger.info("Upgrading Scaleway Kapsule cluster {id} to {version}", {
-          id: g.clusterId,
+          id: clusterId,
           version: args.version,
         });
         const res = await scalewayFetch<Record<string, unknown>>(
           g,
           "POST",
-          `${clustersPath(g)}/${encodeURIComponent(g.clusterId)}/upgrade`,
+          `${clustersPath(g)}/${encodeURIComponent(clusterId)}/upgrade`,
           { version: args.version, upgrade_pools: args.upgradePools },
         );
         const handle = await context.writeResource(
           "cluster",
-          g.clusterId,
+          clusterId,
           toClusterResource(res, g, new Date().toISOString()),
         );
         logger.info("Upgraded Scaleway Kapsule cluster {id} to {version}", {
-          id: g.clusterId,
+          id: clusterId,
           version: args.version,
         });
         return { dataHandles: [handle] };
@@ -531,8 +566,9 @@ export const model = {
         context: ExecuteContext,
       ): Promise<{ dataHandles: Array<{ name: string }> }> => {
         const { globalArgs: g, logger } = context;
+        const clusterId = requireClusterId(g, "delete");
         logger.info("Deleting Scaleway Kapsule cluster {id}", {
-          id: g.clusterId,
+          id: clusterId,
         });
         // Idempotent delete: a 404 means the cluster is already gone — treat it
         // as success and record an absent snapshot (CONVENTIONS.md §3.2).
@@ -542,7 +578,7 @@ export const model = {
           res = await scalewayFetch<Record<string, unknown>>(
             g,
             "DELETE",
-            `${clustersPath(g)}/${encodeURIComponent(g.clusterId)}`,
+            `${clustersPath(g)}/${encodeURIComponent(clusterId)}`,
           );
         } catch (e) {
           if ((e as { status?: number }).status !== 404) throw e;
@@ -551,18 +587,18 @@ export const model = {
         const observedAt = new Date().toISOString();
         const snapshot = absent
           ? toClusterResource(
-            { id: g.clusterId, status: "absent" },
+            { id: clusterId, status: "absent" },
             g,
             observedAt,
           )
-          : toClusterResource(res ?? { id: g.clusterId }, g, observedAt);
+          : toClusterResource(res ?? { id: clusterId }, g, observedAt);
         const handle = await context.writeResource(
           "cluster",
-          g.clusterId,
+          clusterId,
           snapshot,
         );
         logger.info("Deleted Scaleway Kapsule cluster {id} (absent={absent})", {
-          id: g.clusterId,
+          id: clusterId,
           absent,
         });
         return { dataHandles: [handle] };
@@ -608,14 +644,15 @@ export const model = {
         context: ExecuteContext,
       ): Promise<{ dataHandles: Array<{ name: string }> }> => {
         const { globalArgs: g, logger } = context;
+        const clusterId = requireClusterId(g, "list-pools");
         const pools = await scalewayListAll<Record<string, unknown>>(
           g,
-          `${clustersPath(g)}/${encodeURIComponent(g.clusterId)}/pools`,
+          `${clustersPath(g)}/${encodeURIComponent(clusterId)}/pools`,
           "pools",
         );
         logger.info("Discovered {n} pools on cluster {id}", {
           n: pools.length,
-          id: g.clusterId,
+          id: clusterId,
         });
         const now = new Date().toISOString();
         const handles: Array<{ name: string }> = [];
@@ -640,22 +677,23 @@ export const model = {
         context: ExecuteContext,
       ): Promise<{ dataHandles: Array<{ name: string }> }> => {
         const { globalArgs: g, logger } = context;
+        const clusterId = requireClusterId(g, "get-kubeconfig");
         // Never log the kubeconfig contents — only the fact of the fetch.
         logger.info("Fetching kubeconfig for Scaleway Kapsule cluster {id}", {
-          id: g.clusterId,
+          id: clusterId,
         });
         const res = await scalewayFetch<Record<string, unknown>>(
           g,
           "GET",
-          `${clustersPath(g)}/${encodeURIComponent(g.clusterId)}/kubeconfig`,
+          `${clustersPath(g)}/${encodeURIComponent(clusterId)}/kubeconfig`,
         );
         const handle = await context.writeResource(
           "kubeconfig",
-          g.clusterId,
+          clusterId,
           toKubeconfigResource(res, g, new Date().toISOString()),
         );
         logger.info("Fetched kubeconfig for Scaleway Kapsule cluster {id}", {
-          id: g.clusterId,
+          id: clusterId,
         });
         return { dataHandles: [handle] };
       },

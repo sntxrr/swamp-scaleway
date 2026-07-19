@@ -25,8 +25,10 @@ const GlobalArgsSchema = z.object({
   region: z.string().default("fr-par").describe(
     "Region, e.g. fr-par, nl-ams, pl-waw.",
   ),
-  containerId: z.string().describe(
-    "ID of the Serverless Container this model manages.",
+  containerId: z.string().optional().describe(
+    "ID of the Serverless Container this model manages. Optional — `create` " +
+      "provisions a new container and returns its ID; every other method " +
+      "requires it.",
   ),
   namespaceId: z.string().optional().describe(
     "Namespace ID that owns the container. Required for create; optional list filter.",
@@ -260,7 +262,11 @@ function toContainerResource(
   observedAt: string,
 ): Record<string, unknown> {
   return {
-    id: (c.id as string) ?? g.containerId,
+    // Callers always supply an id: API responses carry one, and the delete
+    // path passes the guarded containerId. The final "" is unreachable
+    // defensive padding so the snapshot still satisfies ContainerSchema's
+    // required id.
+    id: (c.id as string) ?? g.containerId ?? "",
     name: (c.name as string) ?? null,
     namespaceId: (c.namespace_id as string) ?? g.namespaceId ?? null,
     status: (c.status as string) ?? "unknown",
@@ -309,11 +315,32 @@ const containersPath = (g: GlobalArgs): string =>
 const namespacesPath = (g: GlobalArgs): string =>
   `/containers/v1beta1/regions/${g.region}/namespaces`;
 
+/**
+ * Resolve the managed container ID for methods that act on an *existing*
+ * container.
+ *
+ * `containerId` is optional in the global schema because `create` provisions
+ * the container and learns its ID from the API — requiring it up front would
+ * force callers to pass a throwaway placeholder just to satisfy validation.
+ * Methods that read or mutate an existing container call this to fail fast with
+ * an actionable message.
+ */
+function requireContainerId(g: GlobalArgs, method: string): string {
+  if (!g.containerId) {
+    throw new Error(
+      `The "${method}" method requires globalArgs.containerId — the ID of an ` +
+        `existing container. Set containerId on the model, or run "create" ` +
+        `first to provision one.`,
+    );
+  }
+  return g.containerId;
+}
+
 // --- Model -----------------------------------------------------------------
 /** Scaleway Serverless Containers model — one instance per container, keyed by containerId. */
 export const model = {
   type: "@sntxrr/scaleway-serverless-containers",
-  version: "2026.07.18.1",
+  version: "2026.07.19.1",
   globalArguments: GlobalArgsSchema,
   resources: {
     "container": {
@@ -362,18 +389,19 @@ export const model = {
         context: ExecuteContext,
       ): Promise<{ dataHandles: Array<{ name: string }> }> => {
         const { globalArgs: g, logger } = context;
-        logger.info("Syncing Scaleway container {id}", { id: g.containerId });
+        const containerId = requireContainerId(g, "sync");
+        logger.info("Syncing Scaleway container {id}", { id: containerId });
         const res = await scalewayFetch<Record<string, unknown>>(
           g,
           "GET",
-          `${containersPath(g)}/${encodeURIComponent(g.containerId)}`,
+          `${containersPath(g)}/${encodeURIComponent(containerId)}`,
         );
         const handle = await context.writeResource(
           "container",
-          g.containerId,
+          containerId,
           toContainerResource(res, g, new Date().toISOString()),
         );
-        logger.info("Synced Scaleway container {id}", { id: g.containerId });
+        logger.info("Synced Scaleway container {id}", { id: containerId });
         return { dataHandles: [handle] };
       },
     },
@@ -420,7 +448,10 @@ export const model = {
           containersPath(g),
           body,
         );
-        const newId = (res.id as string) ?? g.containerId;
+        // CreateContainer always returns the new ID; fall back to a preset
+        // containerId only if the caller pinned one, so create never depends on
+        // it being set.
+        const newId = (res.id as string) ?? g.containerId ?? "";
         const handle = await context.writeResource(
           "container",
           newId,
@@ -441,7 +472,8 @@ export const model = {
         context: ExecuteContext,
       ): Promise<{ dataHandles: Array<{ name: string }> }> => {
         const { globalArgs: g, logger } = context;
-        logger.info("Updating Scaleway container {id}", { id: g.containerId });
+        const containerId = requireContainerId(g, "update");
+        logger.info("Updating Scaleway container {id}", { id: containerId });
         const body: Record<string, unknown> = {};
         if (args.registryImage !== undefined) {
           body.registry_image = args.registryImage;
@@ -461,15 +493,15 @@ export const model = {
         const res = await scalewayFetch<Record<string, unknown>>(
           g,
           "PATCH",
-          `${containersPath(g)}/${encodeURIComponent(g.containerId)}`,
+          `${containersPath(g)}/${encodeURIComponent(containerId)}`,
           body,
         );
         const handle = await context.writeResource(
           "container",
-          g.containerId,
+          containerId,
           toContainerResource(res, g, new Date().toISOString()),
         );
-        logger.info("Updated Scaleway container {id}", { id: g.containerId });
+        logger.info("Updated Scaleway container {id}", { id: containerId });
         return { dataHandles: [handle] };
       },
     },
@@ -481,7 +513,8 @@ export const model = {
         context: ExecuteContext,
       ): Promise<{ dataHandles: Array<{ name: string }> }> => {
         const { globalArgs: g, logger } = context;
-        logger.info("Deleting Scaleway container {id}", { id: g.containerId });
+        const containerId = requireContainerId(g, "delete");
+        logger.info("Deleting Scaleway container {id}", { id: containerId });
         // Idempotent delete: a 404 means the container is already gone — treat
         // it as success and record an absent snapshot (CONVENTIONS.md §3.2).
         let res: Record<string, unknown> | undefined;
@@ -490,7 +523,7 @@ export const model = {
           res = await scalewayFetch<Record<string, unknown>>(
             g,
             "DELETE",
-            `${containersPath(g)}/${encodeURIComponent(g.containerId)}`,
+            `${containersPath(g)}/${encodeURIComponent(containerId)}`,
           );
         } catch (e) {
           if ((e as { status?: number }).status !== 404) throw e;
@@ -499,18 +532,18 @@ export const model = {
         const observedAt = new Date().toISOString();
         const snapshot = absent
           ? toContainerResource(
-            { id: g.containerId, status: "absent" },
+            { id: containerId, status: "absent" },
             g,
             observedAt,
           )
-          : toContainerResource(res ?? { id: g.containerId }, g, observedAt);
+          : toContainerResource(res ?? { id: containerId }, g, observedAt);
         const handle = await context.writeResource(
           "container",
-          g.containerId,
+          containerId,
           snapshot,
         );
         logger.info("Deleted Scaleway container {id} (absent={absent})", {
-          id: g.containerId,
+          id: containerId,
           absent,
         });
         return { dataHandles: [handle] };
@@ -525,26 +558,27 @@ export const model = {
         context: ExecuteContext,
       ): Promise<{ dataHandles: Array<{ name: string }> }> => {
         const { globalArgs: g, logger } = context;
+        const containerId = requireContainerId(g, "action");
         logger.info("Redeploying Scaleway container {id}", {
-          id: g.containerId,
+          id: containerId,
         });
         const res = await scalewayFetch<Record<string, unknown>>(
           g,
           "POST",
-          `${containersPath(g)}/${encodeURIComponent(g.containerId)}/redeploy`,
+          `${containersPath(g)}/${encodeURIComponent(containerId)}/redeploy`,
           {},
         );
         const handle = await context.writeResource(
           "container",
-          g.containerId,
+          containerId,
           toContainerResource(
-            res ?? { id: g.containerId },
+            res ?? { id: containerId },
             g,
             new Date().toISOString(),
           ),
         );
         logger.info("Redeployed Scaleway container {id}", {
-          id: g.containerId,
+          id: containerId,
         });
         return { dataHandles: [handle] };
       },

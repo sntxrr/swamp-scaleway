@@ -1,21 +1,21 @@
 # @sntxrr/scaleway-webhosting
 
-A [swamp](https://swamp-club.com) model for a **Scaleway Web Hosting plan** — one
-model instance per plan, keyed by its hosting ID. Wraps the
+A [swamp](https://swamp-club.com) model for a **Scaleway Web Hosting plan** —
+one model instance per plan, keyed by its hosting ID. Wraps the
 [Scaleway Web Hosting API](https://www.scaleway.com/en/developers/api/webhosting/hosting-api/)
 (`/webhosting/v1`, regional) using only Deno's built-in `fetch` — no SDK.
-Authenticated with the `X-Auth-Token` header (secret key wired from a vault). Web
-Hosting is currently offered only in the `fr-par` region.
+Authenticated with the `X-Auth-Token` header (secret key wired from a vault).
+Web Hosting is currently offered only in the `fr-par` region.
 
 ## Methods
 
-| Method   | What it does                                                            |
-| -------- | ---------------------------------------------------------------------- |
-| `sync`   | Fetch the plan's current state (`GetHosting`) and store a snapshot      |
-| `create` | Provision a new Web Hosting plan (`CreateHosting`) and snapshot it      |
-| `update` | Mutate mutable fields — offer, tags, protected (`UpdateHosting`)        |
-| `delete` | Deprovision the plan (`DeleteHosting`); a 404 is treated as absent      |
-| `list`   | Factory discovery — snapshot every plan in the region (paginated)       |
+| Method   | What it does                                                       |
+| -------- | ------------------------------------------------------------------ |
+| `sync`   | Fetch the plan's current state (`GetHosting`) and store a snapshot |
+| `create` | Provision a new Web Hosting plan (`CreateHosting`) and snapshot it |
+| `update` | Mutate mutable fields — offer, tags, protected (`UpdateHosting`)   |
+| `delete` | Deprovision the plan (`DeleteHosting`); a 404 is treated as absent |
+| `list`   | Factory discovery — snapshot every plan in the region (paginated)  |
 
 ## Secret handling
 
@@ -53,19 +53,19 @@ swamp model @sntxrr/scaleway-webhosting method run delete main-site
 swamp model @sntxrr/scaleway-webhosting method run list main-site
 ```
 
-`sync` and `list` are read-only. Scaleway provisioning is asynchronous — the plan
-returns a transient status (`delivering`, `updating`); poll `sync` to observe the
-settled `ready` state.
+`sync` and `list` are read-only. Scaleway provisioning is asynchronous — the
+plan returns a transient status (`delivering`, `updating`); poll `sync` to
+observe the settled `ready` state.
 
 ## Global arguments
 
-| Arg         | Required | Default                    | Description                                            |
-| ----------- | -------- | -------------------------- | ------------------------------------------------------ |
-| `secretKey` | yes      | —                          | Scaleway API secret key (sensitive; wire from a vault) |
-| `projectId` | yes      | —                          | Project ID that owns the plan                          |
-| `region`    | no       | `fr-par`                   | Region (Web Hosting is offered only in `fr-par`)       |
-| `hostingId` | yes      | —                          | ID of the Web Hosting plan this model manages          |
-| `endpoint`  | no       | `https://api.scaleway.com` | Override the API host                                  |
+| Arg         | Required    | Default                    | Description                                                                                                  |
+| ----------- | ----------- | -------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| `secretKey` | yes         | —                          | Scaleway API secret key (sensitive; wire from a vault)                                                       |
+| `projectId` | yes         | —                          | Project ID that owns the plan                                                                                |
+| `region`    | no          | `fr-par`                   | Region (Web Hosting is offered only in `fr-par`)                                                             |
+| `hostingId` | conditional | —                          | ID of the Web Hosting plan this model manages. Required by every method except `create`, which provisions it |
+| `endpoint`  | no          | `https://api.scaleway.com` | Override the API host                                                                                        |
 
 ## Development
 

@@ -9,12 +9,12 @@ vault).
 
 ## Methods
 
-| Method        | What it does                                                                    |
-| ------------- | ------------------------------------------------------------------------------- |
+| Method        | What it does                                                                     |
+| ------------- | -------------------------------------------------------------------------------- |
 | `sync`        | Fetch the secret's current metadata (`GetSecret`) and store a snapshot           |
 | `create`      | Create a new secret's metadata (`CreateSecret`) — name/tags/type only, no value  |
-| `update`      | Mutate mutable metadata — name, tags, path, description (`UpdateSecret`)          |
-| `delete`      | Delete the secret and all its versions (`DeleteSecret`); idempotent on 404        |
+| `update`      | Mutate mutable metadata — name, tags, path, description (`UpdateSecret`)         |
+| `delete`      | Delete the secret and all its versions (`DeleteSecret`); idempotent on 404       |
 | `list`        | Factory discovery — snapshot every secret in the region (paginated)              |
 | `add-version` | Store a new secret **value** as a version (`CreateSecretVersion`)                |
 | `access`      | Read the latest (or a given revision's) secret **value** (`AccessSecretVersion`) |
@@ -29,9 +29,9 @@ model treats it as radioactive:
   written into a snapshot**.
 - `access` returns the value **only** through the dedicated `secretValue`
   resource, which is declared `sensitiveOutput: true` (its `value` field is also
-  `.meta({ sensitive: true })`). swamp vaults those fields and replaces them with
-  a vault reference before persistence, so **cleartext never lands on disk**, and
-  the value is **never logged**.
+  `.meta({ sensitive: true })`). swamp vaults those fields and replaces them
+  with a vault reference before persistence, so **cleartext never lands on
+  disk**, and the value is **never logged**.
 - Metadata snapshots (`secret`, `secretVersion`) carry only non-secret fields —
   id, name, status, version count, type, tags, path, timestamps.
 
@@ -77,13 +77,13 @@ pre-flight check first.
 
 ## Global arguments
 
-| Arg         | Required | Default                    | Description                                            |
-| ----------- | -------- | -------------------------- | ------------------------------------------------------ |
-| `secretKey` | yes      | —                          | Scaleway API secret key (sensitive; wire from a vault) |
-| `projectId` | yes      | —                          | Project ID that owns the secret                        |
-| `region`    | no       | `fr-par`                   | Region (`fr-par`, `nl-ams`, `pl-waw`)                  |
-| `secretId`  | yes      | —                          | ID of the secret this model manages                    |
-| `endpoint`  | no       | `https://api.scaleway.com` | Override the API host                                  |
+| Arg         | Required    | Default                    | Description                                                                                        |
+| ----------- | ----------- | -------------------------- | -------------------------------------------------------------------------------------------------- |
+| `secretKey` | yes         | —                          | Scaleway API secret key (sensitive; wire from a vault)                                             |
+| `projectId` | yes         | —                          | Project ID that owns the secret                                                                    |
+| `region`    | no          | `fr-par`                   | Region (`fr-par`, `nl-ams`, `pl-waw`)                                                              |
+| `secretId`  | conditional | —                          | ID of the secret this model manages. Required by every method except `create`, which provisions it |
+| `endpoint`  | no          | `https://api.scaleway.com` | Override the API host                                                                              |
 
 ## Development
 

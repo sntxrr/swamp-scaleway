@@ -8,8 +8,8 @@ with the `X-Auth-Token` header (secret key wired from a vault).
 
 ## Methods
 
-| Method   | What it does                                                                   |
-| -------- | ------------------------------------------------------------------------------ |
+| Method   | What it does                                                                    |
+| -------- | ------------------------------------------------------------------------------- |
 | `sync`   | Fetch the Public Gateway's current state (`GetGateway`) and store a snapshot    |
 | `create` | Provision a new Public Gateway (`CreateGateway`) and snapshot it (with its ID)  |
 | `update` | Update the gateway's `name`, `tags`, or bastion/SMTP settings (`UpdateGateway`) |
@@ -47,13 +47,13 @@ asynchronous — `create` returns a transient status (`allocating`,
 
 ## Global arguments
 
-| Arg         | Required | Default                    | Description                                              |
-| ----------- | -------- | -------------------------- | -------------------------------------------------------- |
-| `secretKey` | yes      | —                          | Scaleway API secret key (sensitive; wire from a vault)   |
-| `projectId` | yes      | —                          | Project ID that owns the Public Gateway                  |
-| `zone`      | no       | `fr-par-1`                 | Availability zone (`fr-par-1`, `it-mil-1`, `nl-ams-1`…)  |
-| `gatewayId` | yes      | —                          | ID of the Public Gateway this model manages              |
-| `endpoint`  | no       | `https://api.scaleway.com` | Override the API host                                    |
+| Arg         | Required    | Default                    | Description                                                                                                |
+| ----------- | ----------- | -------------------------- | ---------------------------------------------------------------------------------------------------------- |
+| `secretKey` | yes         | —                          | Scaleway API secret key (sensitive; wire from a vault)                                                     |
+| `projectId` | yes         | —                          | Project ID that owns the Public Gateway                                                                    |
+| `zone`      | no          | `fr-par-1`                 | Availability zone (`fr-par-1`, `it-mil-1`, `nl-ams-1`…)                                                    |
+| `gatewayId` | conditional | —                          | ID of the Public Gateway this model manages. Required by every method except `create`, which provisions it |
+| `endpoint`  | no          | `https://api.scaleway.com` | Override the API host                                                                                      |
 
 > **Zones:** the Public Gateway v2 API accepts `fr-par-1`, `fr-par-2`,
 > `it-mil-1`, `nl-ams-1`, `nl-ams-2`, `nl-ams-3`, `pl-waw-1`, `pl-waw-2`,

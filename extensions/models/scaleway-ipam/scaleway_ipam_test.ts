@@ -17,7 +17,7 @@ const G = {
 
 // deno-lint-ignore no-explicit-any
 type AnyCtx = any;
-function makeContext(): {
+function makeContext(globalArgs: Record<string, unknown> = G): {
   ctx: AnyCtx;
   writes: Array<{ spec: string; name: string; data: Record<string, unknown> }>;
 } {
@@ -25,7 +25,7 @@ function makeContext(): {
     { spec: string; name: string; data: Record<string, unknown> }
   > = [];
   const ctx = {
-    globalArgs: G,
+    globalArgs,
     logger: { info: () => {}, warn: () => {} },
     writeResource: (
       spec: string,
@@ -249,3 +249,58 @@ Deno.test("ipsPath is regional", () => {
     "/ipam/v1/regions/fr-par/ips",
   );
 });
+
+// --- ipId is optional: create provisions it, other methods require it -------
+
+Deno.test("create works with no ipId set (no placeholder needed)", async () => {
+  const { ipId: _omitted, ...noId } = G;
+  const { ctx, writes } = makeContext(noId);
+  await withMockedFetch(
+    () =>
+      new Response(
+        JSON.stringify({
+          id: "55555555-5555-5555-5555-555555555555",
+          address: "192.0.2.30/32",
+          region: "fr-par",
+          project_id: G.projectId,
+        }),
+        { status: 200 },
+      ),
+    () =>
+      model.methods.create.execute({
+        source: { zonal: "fr-par-1" },
+        isIpv6: false,
+      }, ctx),
+  );
+  // The booked ID comes from the API response, not from a preset globalArg.
+  assertEquals(writes[0].name, "55555555-5555-5555-5555-555555555555");
+  assertEquals(writes[0].data.id, "55555555-5555-5555-5555-555555555555");
+});
+
+for (const method of ["sync", "update", "delete"] as const) {
+  Deno.test(`${method} fails fast with an actionable error when ipId is absent`, async () => {
+    const { ipId: _omitted, ...noId } = G;
+    const { ctx, writes } = makeContext(noId);
+    let fetched = false;
+    const err = await withMockedFetch(
+      () => {
+        fetched = true;
+        return new Response("{}", { status: 200 });
+      },
+      async () => {
+        try {
+          await model.methods[method].execute({}, ctx);
+          return null;
+        } catch (e) {
+          return e as Error;
+        }
+      },
+    );
+    assert(err !== null, `${method} should throw when ipId is missing`);
+    assertStringIncludes(err.message, "ipId");
+    assertStringIncludes(err.message, method);
+    // Guard runs before any network call or write.
+    assertEquals(fetched, false);
+    assertEquals(writes.length, 0);
+  });
+}

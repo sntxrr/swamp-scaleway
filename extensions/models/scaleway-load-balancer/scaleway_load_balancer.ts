@@ -27,7 +27,11 @@ const GlobalArgsSchema = z.object({
   zone: z.string().default("fr-par-1").describe(
     "Availability zone, e.g. fr-par-1, nl-ams-1, pl-waw-1.",
   ),
-  lbId: z.string().describe("ID of the Load Balancer this model manages."),
+  lbId: z.string().optional().describe(
+    "ID of the Load Balancer this model manages. Optional — `create` " +
+      "provisions a new Load Balancer and returns its ID; every other method " +
+      "requires it.",
+  ),
   endpoint: z.string().optional().describe(
     "Override the API host. Defaults to https://api.scaleway.com.",
   ),
@@ -218,7 +222,10 @@ function toLoadBalancerResource(
   const ips = lb.ip as Array<Record<string, unknown>> | null | undefined;
   const firstIp = Array.isArray(ips) && ips.length > 0 ? ips[0] : undefined;
   return {
-    id: (lb.id as string) ?? g.lbId,
+    // Callers always supply an id: API responses carry one, and the delete
+    // path passes the guarded lbId. The final "" is unreachable defensive
+    // padding so the snapshot still satisfies LoadBalancerSchema's required id.
+    id: (lb.id as string) ?? g.lbId ?? "",
     name: (lb.name as string) ?? null,
     description: (lb.description as string) ?? null,
     status: (lb.status as string) ?? "unknown",
@@ -246,7 +253,9 @@ function toBackendResource(
     forwardProtocol: (b.forward_protocol as string) ?? null,
     forwardPort: (b.forward_port as number) ?? null,
     forwardPortAlgorithm: (b.forward_port_algorithm as string) ?? null,
-    lbId: g.lbId,
+    // Only reached from the guarded list-backends; "" is unreachable
+    // defensive padding for BackendSchema's required lbId.
+    lbId: g.lbId ?? "",
     observedAt,
   };
 }
@@ -263,18 +272,40 @@ function toFrontendResource(
     name: (f.name as string) ?? null,
     inboundPort: (f.inbound_port as number) ?? null,
     backendId: (backend?.id as string) ?? (f.backend_id as string) ?? null,
-    lbId: g.lbId,
+    // Only reached from the guarded list-frontends; "" is unreachable
+    // defensive padding for FrontendSchema's required lbId.
+    lbId: g.lbId ?? "",
     observedAt,
   };
 }
 
 const lbsPath = (g: GlobalArgs): string => `/lb/v1/zones/${g.zone}/lbs`;
 
+/**
+ * Resolve the managed Load Balancer ID for methods that act on an *existing* LB.
+ *
+ * `lbId` is optional in the global schema because `create` provisions the Load
+ * Balancer and learns its ID from the API — requiring it up front would force
+ * callers to pass a throwaway placeholder just to satisfy validation. Methods
+ * that read or mutate an existing LB (or enumerate its sub-resources) call this
+ * to fail fast with an actionable message.
+ */
+function requireLbId(g: GlobalArgs, method: string): string {
+  if (!g.lbId) {
+    throw new Error(
+      `The "${method}" method requires globalArgs.lbId — the ID of an ` +
+        `existing Load Balancer. Set lbId on the model, or run "create" first ` +
+        `to provision one.`,
+    );
+  }
+  return g.lbId;
+}
+
 // --- Model -----------------------------------------------------------------
 /** Scaleway Load Balancer model — one instance per LB, keyed by lbId. */
 export const model = {
   type: "@sntxrr/scaleway-load-balancer",
-  version: "2026.07.18.1",
+  version: "2026.07.19.1",
   globalArguments: GlobalArgsSchema,
   resources: {
     "loadBalancer": {
@@ -305,18 +336,19 @@ export const model = {
         context: ExecuteContext,
       ): Promise<{ dataHandles: Array<{ name: string }> }> => {
         const { globalArgs: g, logger } = context;
-        logger.info("Syncing Scaleway Load Balancer {id}", { id: g.lbId });
+        const lbId = requireLbId(g, "sync");
+        logger.info("Syncing Scaleway Load Balancer {id}", { id: lbId });
         const res = await scalewayFetch<Record<string, unknown>>(
           g,
           "GET",
-          `${lbsPath(g)}/${encodeURIComponent(g.lbId)}`,
+          `${lbsPath(g)}/${encodeURIComponent(lbId)}`,
         );
         const handle = await context.writeResource(
           "loadBalancer",
-          g.lbId,
+          lbId,
           toLoadBalancerResource(res, g, new Date().toISOString()),
         );
-        logger.info("Synced Scaleway Load Balancer {id}", { id: g.lbId });
+        logger.info("Synced Scaleway Load Balancer {id}", { id: lbId });
         return { dataHandles: [handle] };
       },
     },
@@ -347,7 +379,9 @@ export const model = {
           lbsPath(g),
           body,
         );
-        const newId = (res.id as string) ?? g.lbId;
+        // CreateLb always returns the new ID; fall back to a preset lbId only if
+        // the caller pinned one, so create never depends on it being set.
+        const newId = (res.id as string) ?? g.lbId ?? "";
         const handle = await context.writeResource(
           "loadBalancer",
           newId,
@@ -365,7 +399,8 @@ export const model = {
         context: ExecuteContext,
       ): Promise<{ dataHandles: Array<{ name: string }> }> => {
         const { globalArgs: g, logger } = context;
-        logger.info("Updating Scaleway Load Balancer {id}", { id: g.lbId });
+        const lbId = requireLbId(g, "update");
+        logger.info("Updating Scaleway Load Balancer {id}", { id: lbId });
         const body: Record<string, unknown> = {};
         if (args.name !== undefined) body.name = args.name;
         if (args.description !== undefined) body.description = args.description;
@@ -373,15 +408,15 @@ export const model = {
         const res = await scalewayFetch<Record<string, unknown>>(
           g,
           "PUT",
-          `${lbsPath(g)}/${encodeURIComponent(g.lbId)}`,
+          `${lbsPath(g)}/${encodeURIComponent(lbId)}`,
           body,
         );
         const handle = await context.writeResource(
           "loadBalancer",
-          g.lbId,
+          lbId,
           toLoadBalancerResource(res, g, new Date().toISOString()),
         );
-        logger.info("Updated Scaleway Load Balancer {id}", { id: g.lbId });
+        logger.info("Updated Scaleway Load Balancer {id}", { id: lbId });
         return { dataHandles: [handle] };
       },
     },
@@ -393,13 +428,14 @@ export const model = {
         context: ExecuteContext,
       ): Promise<{ dataHandles: Array<{ name: string }> }> => {
         const { globalArgs: g, logger } = context;
-        logger.info("Deleting Scaleway Load Balancer {id}", { id: g.lbId });
+        const lbId = requireLbId(g, "delete");
+        logger.info("Deleting Scaleway Load Balancer {id}", { id: lbId });
         try {
           await scalewayFetch(
             g,
             "DELETE",
             `${lbsPath(g)}/${
-              encodeURIComponent(g.lbId)
+              encodeURIComponent(lbId)
             }?release_ip=${args.releaseIp}`,
           );
         } catch (e) {
@@ -409,14 +445,14 @@ export const model = {
         }
         const handle = await context.writeResource(
           "loadBalancer",
-          g.lbId,
+          lbId,
           toLoadBalancerResource(
-            { id: g.lbId, status: "absent" },
+            { id: lbId, status: "absent" },
             g,
             new Date().toISOString(),
           ),
         );
-        logger.info("Deleted Scaleway Load Balancer {id}", { id: g.lbId });
+        logger.info("Deleted Scaleway Load Balancer {id}", { id: lbId });
         return { dataHandles: [handle] };
       },
     },
@@ -460,14 +496,15 @@ export const model = {
         context: ExecuteContext,
       ): Promise<{ dataHandles: Array<{ name: string }> }> => {
         const { globalArgs: g, logger } = context;
+        const lbId = requireLbId(g, "list-backends");
         const backends = await scalewayListAll<Record<string, unknown>>(
           g,
-          `${lbsPath(g)}/${encodeURIComponent(g.lbId)}/backends`,
+          `${lbsPath(g)}/${encodeURIComponent(lbId)}/backends`,
           "backends",
         );
         logger.info("Discovered {n} backends on LB {id}", {
           n: backends.length,
-          id: g.lbId,
+          id: lbId,
         });
         const now = new Date().toISOString();
         const handles: Array<{ name: string }> = [];
@@ -492,14 +529,15 @@ export const model = {
         context: ExecuteContext,
       ): Promise<{ dataHandles: Array<{ name: string }> }> => {
         const { globalArgs: g, logger } = context;
+        const lbId = requireLbId(g, "list-frontends");
         const frontends = await scalewayListAll<Record<string, unknown>>(
           g,
-          `${lbsPath(g)}/${encodeURIComponent(g.lbId)}/frontends`,
+          `${lbsPath(g)}/${encodeURIComponent(lbId)}/frontends`,
           "frontends",
         );
         logger.info("Discovered {n} frontends on LB {id}", {
           n: frontends.length,
-          id: g.lbId,
+          id: lbId,
         });
         const now = new Date().toISOString();
         const handles: Array<{ name: string }> = [];

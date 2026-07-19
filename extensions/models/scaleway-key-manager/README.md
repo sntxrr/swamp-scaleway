@@ -73,13 +73,13 @@ base64 ciphertext; `decrypt` reverses it and returns base64 plaintext.
 
 ## Global arguments
 
-| Arg         | Required | Default                    | Description                                            |
-| ----------- | -------- | -------------------------- | ------------------------------------------------------ |
-| `secretKey` | yes      | —                          | Scaleway API secret key (sensitive; wire from a vault) |
-| `projectId` | yes      | —                          | Project ID that owns the key                           |
-| `region`    | no       | `fr-par`                   | Region (`fr-par`, `nl-ams`, `pl-waw`)                  |
-| `keyId`     | yes      | —                          | ID of the key this model manages                       |
-| `endpoint`  | no       | `https://api.scaleway.com` | Override the API host                                  |
+| Arg         | Required    | Default                    | Description                                                                                     |
+| ----------- | ----------- | -------------------------- | ----------------------------------------------------------------------------------------------- |
+| `secretKey` | yes         | —                          | Scaleway API secret key (sensitive; wire from a vault)                                          |
+| `projectId` | yes         | —                          | Project ID that owns the key                                                                    |
+| `region`    | no          | `fr-par`                   | Region (`fr-par`, `nl-ams`, `pl-waw`)                                                           |
+| `keyId`     | conditional | —                          | ID of the key this model manages. Required by every method except `create`, which provisions it |
+| `endpoint`  | no          | `https://api.scaleway.com` | Override the API host                                                                           |
 
 ## Development
 

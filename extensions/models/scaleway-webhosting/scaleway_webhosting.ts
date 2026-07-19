@@ -27,8 +27,9 @@ const GlobalArgsSchema = z.object({
   region: z.string().default("fr-par").describe(
     "Region hosting the plan. Web Hosting is available only in fr-par.",
   ),
-  hostingId: z.string().describe(
-    "ID of the Web Hosting plan this model manages.",
+  hostingId: z.string().optional().describe(
+    "ID of the Web Hosting plan this model manages. Optional — `create` " +
+      "provisions a new plan and returns its ID; every other method requires it.",
   ),
   endpoint: z.string().optional().describe(
     "Override the API host. Defaults to https://api.scaleway.com.",
@@ -218,7 +219,10 @@ function toHostingResource(
   const platform = h.platform as Record<string, unknown> | null | undefined;
   const user = h.user as Record<string, unknown> | null | undefined;
   return {
-    id: (h.id as string) ?? g.hostingId,
+    // Callers always supply an id: API responses carry one, and the delete
+    // path passes the guarded hostingId. The final "" is unreachable defensive
+    // padding so the snapshot still satisfies HostingSchema's required id.
+    id: (h.id as string) ?? g.hostingId ?? "",
     status: (h.status as string) ?? "unknown",
     domain: (h.domain as string) ?? null,
     region: (h.region as string) ?? g.region,
@@ -239,11 +243,31 @@ function toHostingResource(
 const hostingsPath = (g: GlobalArgs): string =>
   `/webhosting/v1/regions/${g.region}/hostings`;
 
+/**
+ * Resolve the managed plan ID for methods that act on an *existing* plan.
+ *
+ * `hostingId` is optional in the global schema because `create` provisions the
+ * plan and learns its ID from the API — requiring it up front would force
+ * callers to pass a throwaway placeholder just to satisfy validation. Methods
+ * that read or mutate an existing plan call this to fail fast with an
+ * actionable message.
+ */
+function requireHostingId(g: GlobalArgs, method: string): string {
+  if (!g.hostingId) {
+    throw new Error(
+      `The "${method}" method requires globalArgs.hostingId — the ID of an ` +
+        `existing Web Hosting plan. Set hostingId on the model, or run ` +
+        `"create" first to provision one.`,
+    );
+  }
+  return g.hostingId;
+}
+
 // --- Model -----------------------------------------------------------------
 /** Scaleway Web Hosting model — one instance per plan, keyed by hostingId. */
 export const model = {
   type: "@sntxrr/scaleway-webhosting",
-  version: "2026.07.18.1",
+  version: "2026.07.19.1",
   globalArguments: GlobalArgsSchema,
   resources: {
     "hosting": {
@@ -287,21 +311,22 @@ export const model = {
         context: ExecuteContext,
       ): Promise<{ dataHandles: Array<{ name: string }> }> => {
         const { globalArgs: g, logger } = context;
+        const hostingId = requireHostingId(g, "sync");
         logger.info("Syncing Scaleway Web Hosting plan {id}", {
-          id: g.hostingId,
+          id: hostingId,
         });
         const res = await scalewayFetch<Record<string, unknown>>(
           g,
           "GET",
-          `${hostingsPath(g)}/${encodeURIComponent(g.hostingId)}`,
+          `${hostingsPath(g)}/${encodeURIComponent(hostingId)}`,
         );
         const handle = await context.writeResource(
           "hosting",
-          g.hostingId,
+          hostingId,
           toHostingResource(res, g, new Date().toISOString()),
         );
         logger.info("Synced Scaleway Web Hosting plan {id}", {
-          id: g.hostingId,
+          id: hostingId,
         });
         return { dataHandles: [handle] };
       },
@@ -336,7 +361,10 @@ export const model = {
           hostingsPath(g),
           body,
         );
-        const newId = (res.id as string) ?? g.hostingId;
+        // CreateHosting always returns the new ID; fall back to a preset
+        // hostingId only if the caller pinned one, so create never depends on
+        // it being set.
+        const newId = (res.id as string) ?? g.hostingId ?? "";
         const handle = await context.writeResource(
           "hosting",
           newId,
@@ -358,8 +386,9 @@ export const model = {
         context: ExecuteContext,
       ): Promise<{ dataHandles: Array<{ name: string }> }> => {
         const { globalArgs: g, logger } = context;
+        const hostingId = requireHostingId(g, "update");
         logger.info("Updating Scaleway Web Hosting plan {id}", {
-          id: g.hostingId,
+          id: hostingId,
         });
         const body: Record<string, unknown> = {};
         if (args.offerId !== undefined) body.offer_id = args.offerId;
@@ -368,16 +397,16 @@ export const model = {
         const res = await scalewayFetch<Record<string, unknown>>(
           g,
           "PATCH",
-          `${hostingsPath(g)}/${encodeURIComponent(g.hostingId)}`,
+          `${hostingsPath(g)}/${encodeURIComponent(hostingId)}`,
           body,
         );
         const handle = await context.writeResource(
           "hosting",
-          g.hostingId,
+          hostingId,
           toHostingResource(res, g, new Date().toISOString()),
         );
         logger.info("Updated Scaleway Web Hosting plan {id}", {
-          id: g.hostingId,
+          id: hostingId,
         });
         return { dataHandles: [handle] };
       },
@@ -390,8 +419,9 @@ export const model = {
         context: ExecuteContext,
       ): Promise<{ dataHandles: Array<{ name: string }> }> => {
         const { globalArgs: g, logger } = context;
+        const hostingId = requireHostingId(g, "delete");
         logger.info("Deleting Scaleway Web Hosting plan {id}", {
-          id: g.hostingId,
+          id: hostingId,
         });
         // Idempotent delete: a 404 means the plan is already gone — treat it as
         // success and record an absent snapshot (CONVENTIONS.md §3.2).
@@ -401,7 +431,7 @@ export const model = {
           res = await scalewayFetch<Record<string, unknown>>(
             g,
             "DELETE",
-            `${hostingsPath(g)}/${encodeURIComponent(g.hostingId)}`,
+            `${hostingsPath(g)}/${encodeURIComponent(hostingId)}`,
           );
         } catch (e) {
           if ((e as { status?: number }).status !== 404) throw e;
@@ -410,20 +440,20 @@ export const model = {
         const observedAt = new Date().toISOString();
         const snapshot = absent
           ? toHostingResource(
-            { id: g.hostingId, status: "absent" },
+            { id: hostingId, status: "absent" },
             g,
             observedAt,
           )
-          : toHostingResource(res ?? { id: g.hostingId }, g, observedAt);
+          : toHostingResource(res ?? { id: hostingId }, g, observedAt);
         const handle = await context.writeResource(
           "hosting",
-          g.hostingId,
+          hostingId,
           snapshot,
         );
         logger.info(
           "Deleted Scaleway Web Hosting plan {id} (absent={absent})",
           {
-            id: g.hostingId,
+            id: hostingId,
             absent,
           },
         );

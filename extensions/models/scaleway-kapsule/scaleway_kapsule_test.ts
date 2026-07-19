@@ -16,7 +16,7 @@ const G = {
 
 // deno-lint-ignore no-explicit-any
 type AnyCtx = any;
-function makeContext(): {
+function makeContext(globalArgs: Record<string, unknown> = G): {
   ctx: AnyCtx;
   writes: Array<{ spec: string; name: string; data: Record<string, unknown> }>;
 } {
@@ -24,7 +24,7 @@ function makeContext(): {
     { spec: string; name: string; data: Record<string, unknown> }
   > = [];
   const ctx = {
-    globalArgs: G,
+    globalArgs,
     logger: { info: () => {}, warn: () => {} },
     writeResource: (
       spec: string,
@@ -360,3 +360,73 @@ Deno.test("clustersPath is regional", () => {
     "/k8s/v1/regions/fr-par/clusters",
   );
 });
+
+// --- clusterId is optional: create provisions it, others require it ---------
+
+Deno.test("create works with no clusterId set (no placeholder needed)", async () => {
+  const { clusterId: _omitted, ...noId } = G;
+  const { ctx, writes } = makeContext(noId);
+  await withMockedFetch(
+    () =>
+      new Response(
+        JSON.stringify({
+          id: "66666666-6666-6666-6666-666666666666",
+          name: "provisioned-cluster",
+          status: "creating",
+          version: "1.30.2",
+          region: "fr-par",
+        }),
+        { status: 200 },
+      ),
+    () =>
+      model.methods.create.execute({
+        name: "provisioned-cluster",
+        version: "1.30.2",
+        cni: "cilium",
+      }, ctx),
+  );
+  // The new ID comes from the API response, not from a preset globalArg.
+  assertEquals(writes[0].name, "66666666-6666-6666-6666-666666666666");
+  assertEquals(writes[0].data.id, "66666666-6666-6666-6666-666666666666");
+  assertEquals(writes[0].data.name, "provisioned-cluster");
+});
+
+for (
+  const method of [
+    "sync",
+    "update",
+    "upgrade",
+    "delete",
+    "list-pools",
+    "get-kubeconfig",
+  ] as const
+) {
+  Deno.test(`${method} fails fast with an actionable error when clusterId is absent`, async () => {
+    const { clusterId: _omitted, ...noId } = G;
+    const { ctx, writes } = makeContext(noId);
+    let fetched = false;
+    const err = await withMockedFetch(
+      () => {
+        fetched = true;
+        return new Response("{}", { status: 200 });
+      },
+      async () => {
+        try {
+          // The guard runs before any argument is read, so empty args are
+          // fine even for methods with required arguments (e.g. upgrade).
+          // deno-lint-ignore no-explicit-any
+          await (model.methods[method].execute as any)({}, ctx);
+          return null;
+        } catch (e) {
+          return e as Error;
+        }
+      },
+    );
+    assert(err !== null, `${method} should throw when clusterId is missing`);
+    assertStringIncludes(err.message, "clusterId");
+    assertStringIncludes(err.message, method);
+    // Guard runs before any network call or write.
+    assertEquals(fetched, false);
+    assertEquals(writes.length, 0);
+  });
+}

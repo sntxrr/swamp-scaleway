@@ -26,8 +26,10 @@ const GlobalArgsSchema = z.object({
   zone: z.string().default("fr-par-1").describe(
     "Availability zone, e.g. fr-par-1, nl-ams-1, pl-waw-1.",
   ),
-  clusterId: z.string().describe(
-    "ID of the Managed Redis cluster this model manages.",
+  clusterId: z.string().optional().describe(
+    "ID of the Managed Redis cluster this model manages. Optional — `create` " +
+      "provisions a new cluster and returns its ID; every other method " +
+      "requires it.",
   ),
   endpoint: z.string().optional().describe(
     "Override the API host. Defaults to https://api.scaleway.com.",
@@ -216,7 +218,10 @@ function toClusterResource(
   const endpointHost = (ips && ips.length > 0 ? ips[0] : undefined) ??
     (primary?.ip as string) ?? null;
   return {
-    id: (c.id as string) ?? g.clusterId,
+    // Callers always supply an id: API responses carry one, and the delete
+    // path passes the guarded clusterId. The final "" is unreachable defensive
+    // padding so the snapshot still satisfies ClusterSchema's required id.
+    id: (c.id as string) ?? g.clusterId ?? "",
     name: (c.name as string) ?? null,
     status: (c.status as string) ?? "unknown",
     version: (c.version as string) ?? null,
@@ -236,6 +241,26 @@ function toClusterResource(
 const clustersPath = (g: GlobalArgs): string =>
   `/redis/v1/zones/${g.zone}/clusters`;
 
+/**
+ * Resolve the managed cluster ID for methods that act on an *existing* cluster.
+ *
+ * `clusterId` is optional in the global schema because `create` provisions the
+ * cluster and learns its ID from the API — requiring it up front would force
+ * callers to pass a throwaway placeholder just to satisfy validation. Methods
+ * that read or mutate an existing cluster call this to fail fast with an
+ * actionable message.
+ */
+function requireClusterId(g: GlobalArgs, method: string): string {
+  if (!g.clusterId) {
+    throw new Error(
+      `The "${method}" method requires globalArgs.clusterId — the ID of an ` +
+        `existing Managed Redis cluster. Set clusterId on the model, or run ` +
+        `"create" first to provision one.`,
+    );
+  }
+  return g.clusterId;
+}
+
 /** The nine Scaleway availability zones (fr-par, nl-ams, pl-waw × 1..3). */
 const SCALEWAY_ZONES: readonly string[] = [
   "fr-par-1",
@@ -253,7 +278,7 @@ const SCALEWAY_ZONES: readonly string[] = [
 /** Scaleway Managed Redis model — one instance per cluster, keyed by clusterId. */
 export const model = {
   type: "@sntxrr/scaleway-redis",
-  version: "2026.07.18.1",
+  version: "2026.07.19.1",
   globalArguments: GlobalArgsSchema,
   resources: {
     "cluster": {
@@ -295,20 +320,21 @@ export const model = {
         context: ExecuteContext,
       ): Promise<{ dataHandles: Array<{ name: string }> }> => {
         const { globalArgs: g, logger } = context;
+        const clusterId = requireClusterId(g, "sync");
         logger.info("Syncing Scaleway Redis cluster {id}", {
-          id: g.clusterId,
+          id: clusterId,
         });
         const res = await scalewayFetch<Record<string, unknown>>(
           g,
           "GET",
-          `${clustersPath(g)}/${encodeURIComponent(g.clusterId)}`,
+          `${clustersPath(g)}/${encodeURIComponent(clusterId)}`,
         );
         const handle = await context.writeResource(
           "cluster",
-          g.clusterId,
+          clusterId,
           toClusterResource(res, g, new Date().toISOString()),
         );
-        logger.info("Synced Scaleway Redis cluster {id}", { id: g.clusterId });
+        logger.info("Synced Scaleway Redis cluster {id}", { id: clusterId });
         return { dataHandles: [handle] };
       },
     },
@@ -345,7 +371,10 @@ export const model = {
           clustersPath(g),
           body,
         );
-        const newId = (res.id as string) ?? g.clusterId;
+        // CreateCluster always returns the new ID; fall back to a preset
+        // clusterId only if the caller pinned one, so create never depends on
+        // it being set.
+        const newId = (res.id as string) ?? g.clusterId ?? "";
         const handle = await context.writeResource(
           "cluster",
           newId,
@@ -366,8 +395,9 @@ export const model = {
         context: ExecuteContext,
       ): Promise<{ dataHandles: Array<{ name: string }> }> => {
         const { globalArgs: g, logger } = context;
+        const clusterId = requireClusterId(g, "update");
         logger.info("Updating Scaleway Redis cluster {id}", {
-          id: g.clusterId,
+          id: clusterId,
         });
         const body: Record<string, unknown> = {};
         if (args.name !== undefined) body.name = args.name;
@@ -375,15 +405,15 @@ export const model = {
         const res = await scalewayFetch<Record<string, unknown>>(
           g,
           "PATCH",
-          `${clustersPath(g)}/${encodeURIComponent(g.clusterId)}`,
+          `${clustersPath(g)}/${encodeURIComponent(clusterId)}`,
           body,
         );
         const handle = await context.writeResource(
           "cluster",
-          g.clusterId,
+          clusterId,
           toClusterResource(res, g, new Date().toISOString()),
         );
-        logger.info("Updated Scaleway Redis cluster {id}", { id: g.clusterId });
+        logger.info("Updated Scaleway Redis cluster {id}", { id: clusterId });
         return { dataHandles: [handle] };
       },
     },
@@ -395,8 +425,9 @@ export const model = {
         context: ExecuteContext,
       ): Promise<{ dataHandles: Array<{ name: string }> }> => {
         const { globalArgs: g, logger } = context;
+        const clusterId = requireClusterId(g, "delete");
         logger.info("Deleting Scaleway Redis cluster {id}", {
-          id: g.clusterId,
+          id: clusterId,
         });
         // Idempotent delete: a 404 means the cluster is already gone — treat it
         // as success and record an absent snapshot (CONVENTIONS.md §3.2).
@@ -406,7 +437,7 @@ export const model = {
           res = await scalewayFetch<Record<string, unknown>>(
             g,
             "DELETE",
-            `${clustersPath(g)}/${encodeURIComponent(g.clusterId)}`,
+            `${clustersPath(g)}/${encodeURIComponent(clusterId)}`,
           );
         } catch (e) {
           if ((e as { status?: number }).status !== 404) throw e;
@@ -415,18 +446,18 @@ export const model = {
         const observedAt = new Date().toISOString();
         const snapshot = absent
           ? toClusterResource(
-            { id: g.clusterId, status: "absent" },
+            { id: clusterId, status: "absent" },
             g,
             observedAt,
           )
-          : toClusterResource(res ?? { id: g.clusterId }, g, observedAt);
+          : toClusterResource(res ?? { id: clusterId }, g, observedAt);
         const handle = await context.writeResource(
           "cluster",
-          g.clusterId,
+          clusterId,
           snapshot,
         );
         logger.info("Deleted Scaleway Redis cluster {id} (absent={absent})", {
-          id: g.clusterId,
+          id: clusterId,
           absent,
         });
         return { dataHandles: [handle] };

@@ -8,13 +8,13 @@ with the `X-Auth-Token` header (secret key wired from a vault).
 
 ## Methods
 
-| Method   | What it does                                                                          |
-| -------- | ------------------------------------------------------------------------------------- |
-| `sync`   | Fetch the volume's current state (`GetVolume`) and store a snapshot                     |
-| `create` | Provision a new volume (`CreateVolume`) from empty (with `size`) or from a snapshot     |
-| `update` | Mutate name, size (resize), IOPS, or tags (`UpdateVolume`, PATCH)                       |
-| `delete` | Deprovision the volume (`DeleteVolume`)                                                 |
-| `list`   | Factory discovery — snapshot every volume in the zone (paginated)                      |
+| Method   | What it does                                                                        |
+| -------- | ----------------------------------------------------------------------------------- |
+| `sync`   | Fetch the volume's current state (`GetVolume`) and store a snapshot                 |
+| `create` | Provision a new volume (`CreateVolume`) from empty (with `size`) or from a snapshot |
+| `update` | Mutate name, size (resize), IOPS, or tags (`UpdateVolume`, PATCH)                   |
+| `delete` | Deprovision the volume (`DeleteVolume`)                                             |
+| `list`   | Factory discovery — snapshot every volume in the zone (paginated)                   |
 
 ## Setup
 
@@ -50,13 +50,13 @@ swamp model @sntxrr/scaleway-block-storage method run list data-1
 
 ## Global arguments
 
-| Arg         | Required | Default                     | Description                                             |
-| ----------- | -------- | --------------------------- | ------------------------------------------------------- |
-| `secretKey` | yes      | —                           | Scaleway API secret key (sensitive; wire from a vault)  |
-| `projectId` | yes      | —                           | Project ID that owns the volume                         |
-| `zone`      | no       | `fr-par-1`                  | Availability zone (`fr-par-1`, `nl-ams-1`, `pl-waw-1`…) |
-| `volumeId`  | yes      | —                           | ID of the Block Storage volume this model manages       |
-| `endpoint`  | no       | `https://api.scaleway.com`  | Override the API host                                   |
+| Arg         | Required    | Default                    | Description                                                                                                      |
+| ----------- | ----------- | -------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| `secretKey` | yes         | —                          | Scaleway API secret key (sensitive; wire from a vault)                                                           |
+| `projectId` | yes         | —                          | Project ID that owns the volume                                                                                  |
+| `zone`      | no          | `fr-par-1`                 | Availability zone (`fr-par-1`, `nl-ams-1`, `pl-waw-1`…)                                                          |
+| `volumeId`  | conditional | —                          | ID of the Block Storage volume this model manages. Required by every method except `create`, which provisions it |
+| `endpoint`  | no          | `https://api.scaleway.com` | Override the API host                                                                                            |
 
 ## Development
 

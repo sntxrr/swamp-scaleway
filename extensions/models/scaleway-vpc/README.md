@@ -2,20 +2,20 @@
 
 A [swamp](https://swamp-club.com) model for a **Scaleway VPC** (Virtual Private
 Cloud) — one model instance per VPC, keyed by its VPC ID. Wraps the
-[Scaleway VPC API](https://www.scaleway.com/en/developers/api/vpc/)
-(`/vpc/v2`, regional) using only Deno's built-in `fetch` — no SDK.
-Authenticated with the `X-Auth-Token` header (secret key wired from a vault).
+[Scaleway VPC API](https://www.scaleway.com/en/developers/api/vpc/) (`/vpc/v2`,
+regional) using only Deno's built-in `fetch` — no SDK. Authenticated with the
+`X-Auth-Token` header (secret key wired from a vault).
 
 ## Methods
 
 | Method                  | What it does                                                          |
-| ----------------------- | -------------------------------------------------------------------- |
+| ----------------------- | --------------------------------------------------------------------- |
 | `sync`                  | Fetch the VPC's current state (`GetVPC`) and store a snapshot         |
 | `create`                | Provision a new VPC (`CreateVPC`) and snapshot it, including its ID   |
 | `update`                | Mutate the VPC's name, tags, or routing (`UpdateVPC`) and snapshot it |
 | `delete`                | Deprovision the VPC (`DeleteVPC`); a 404 is treated as already gone   |
-| `list`                  | Factory discovery — snapshot every VPC in the region (paginated)     |
-| `list-private-networks` | Factory discovery — snapshot every Private Network in the region     |
+| `list`                  | Factory discovery — snapshot every VPC in the region (paginated)      |
+| `list-private-networks` | Factory discovery — snapshot every Private Network in the region      |
 
 ## Setup
 
@@ -48,18 +48,18 @@ snapshot including the new VPC's ID; `update` mutates the VPC's name, tags, or
 routing and re-snapshots it; `delete` deprovisions the VPC keyed by `vpcId` (a
 `404` is treated as already gone) and writes an absent snapshot — verify the ID
 first with `swamp model get --json`. A labeled `valid-region` pre-flight check
-runs before `create`/`update`/`delete`, rejecting any `region` outside
-`fr-par`, `nl-ams`, `pl-waw`.
+runs before `create`/`update`/`delete`, rejecting any `region` outside `fr-par`,
+`nl-ams`, `pl-waw`.
 
 ## Global arguments
 
-| Arg         | Required | Default                    | Description                                            |
-| ----------- | -------- | -------------------------- | ------------------------------------------------------ |
-| `secretKey` | yes      | —                          | Scaleway API secret key (sensitive; wire from a vault) |
-| `projectId` | yes      | —                          | Project ID that owns the VPC                           |
-| `region`    | no       | `fr-par`                   | Region (`fr-par`, `nl-ams`, `pl-waw`)                  |
-| `vpcId`     | yes      | —                          | ID of the VPC this model manages                       |
-| `endpoint`  | no       | `https://api.scaleway.com` | Override the API host                                  |
+| Arg         | Required    | Default                    | Description                                                                                     |
+| ----------- | ----------- | -------------------------- | ----------------------------------------------------------------------------------------------- |
+| `secretKey` | yes         | —                          | Scaleway API secret key (sensitive; wire from a vault)                                          |
+| `projectId` | yes         | —                          | Project ID that owns the VPC                                                                    |
+| `region`    | no          | `fr-par`                   | Region (`fr-par`, `nl-ams`, `pl-waw`)                                                           |
+| `vpcId`     | conditional | —                          | ID of the VPC this model manages. Required by every method except `create`, which provisions it |
+| `endpoint`  | no          | `https://api.scaleway.com` | Override the API host                                                                           |
 
 ## Development
 

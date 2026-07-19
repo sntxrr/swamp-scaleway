@@ -15,7 +15,7 @@ const G = {
 
 // deno-lint-ignore no-explicit-any
 type AnyCtx = any;
-function makeContext(): {
+function makeContext(globalArgs: Record<string, unknown> = G): {
   ctx: AnyCtx;
   writes: Array<{ spec: string; name: string; data: Record<string, unknown> }>;
 } {
@@ -23,7 +23,7 @@ function makeContext(): {
     { spec: string; name: string; data: Record<string, unknown> }
   > = [];
   const ctx = {
-    globalArgs: G,
+    globalArgs,
     logger: { info: () => {}, warn: () => {} },
     writeResource: (
       spec: string,
@@ -328,3 +328,55 @@ Deno.test("path helpers build the regional VPC URLs", () => {
     "/vpc/v2/regions/fr-par/private-networks",
   );
 });
+
+// --- vpcId is optional: create provisions it, other methods require it ------
+
+Deno.test("create works with no vpcId set (no placeholder needed)", async () => {
+  const { vpcId: _omitted, ...noId } = G;
+  const { ctx, writes } = makeContext(noId);
+  await withMockedFetch(
+    () =>
+      new Response(
+        JSON.stringify({
+          id: "55555555-5555-5555-5555-555555555555",
+          name: "prod-vpc",
+          region: "fr-par",
+          project_id: G.projectId,
+          tags: [],
+        }),
+        { status: 200 },
+      ),
+    () => model.methods.create.execute({ name: "prod-vpc" }, ctx),
+  );
+  // The provisioned ID comes from the API response, not from a preset globalArg.
+  assertEquals(writes[0].name, "55555555-5555-5555-5555-555555555555");
+  assertEquals(writes[0].data.id, "55555555-5555-5555-5555-555555555555");
+});
+
+for (const method of ["sync", "update", "delete"] as const) {
+  Deno.test(`${method} fails fast with an actionable error when vpcId is absent`, async () => {
+    const { vpcId: _omitted, ...noId } = G;
+    const { ctx, writes } = makeContext(noId);
+    let fetched = false;
+    const err = await withMockedFetch(
+      () => {
+        fetched = true;
+        return new Response("{}", { status: 200 });
+      },
+      async () => {
+        try {
+          await model.methods[method].execute({}, ctx);
+          return null;
+        } catch (e) {
+          return e as Error;
+        }
+      },
+    );
+    assert(err !== null, `${method} should throw when vpcId is missing`);
+    assertStringIncludes(err.message, "vpcId");
+    assertStringIncludes(err.message, method);
+    // Guard runs before any network call or write.
+    assertEquals(fetched, false);
+    assertEquals(writes.length, 0);
+  });
+}

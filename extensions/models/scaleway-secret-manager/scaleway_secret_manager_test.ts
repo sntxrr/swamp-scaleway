@@ -18,7 +18,7 @@ const G = {
 
 // deno-lint-ignore no-explicit-any
 type AnyCtx = any;
-function makeContext(): {
+function makeContext(globalArgs: Record<string, unknown> = G): {
   ctx: AnyCtx;
   writes: Array<{ spec: string; name: string; data: Record<string, unknown> }>;
   logs: string[];
@@ -31,7 +31,7 @@ function makeContext(): {
     logs.push(message + " " + JSON.stringify(props ?? {}));
   };
   const ctx = {
-    globalArgs: G,
+    globalArgs,
     logger: { info: record, warn: record },
     writeResource: (
       spec: string,
@@ -436,3 +436,58 @@ Deno.test("base64 round-trips UTF-8 values", () => {
   const value = "pä$$wörd-🔐";
   assertEquals(_internal.fromBase64(_internal.toBase64(value)), value);
 });
+
+// --- secretId is optional: create provisions it, other methods require it ---
+
+Deno.test("create works with no secretId set (no placeholder needed)", async () => {
+  const { secretId: _omitted, ...noId } = G;
+  const { ctx, writes } = makeContext(noId);
+  await withMockedFetch(
+    () =>
+      new Response(
+        JSON.stringify({
+          id: "55555555-5555-5555-5555-555555555555",
+          name: "provisioned",
+          status: "ready",
+          region: "fr-par",
+        }),
+        { status: 200 },
+      ),
+    () => model.methods.create.execute({ name: "provisioned" }, ctx),
+  );
+  // The new ID comes from the API response, not from a preset globalArg.
+  assertEquals(writes[0].name, "55555555-5555-5555-5555-555555555555");
+  assertEquals(writes[0].data.id, "55555555-5555-5555-5555-555555555555");
+  assertEquals(writes[0].data.name, "provisioned");
+});
+
+for (
+  const method of ["sync", "update", "delete", "add-version", "access"] as const
+) {
+  Deno.test(`${method} fails fast with an actionable error when secretId is absent`, async () => {
+    const { secretId: _omitted, ...noId } = G;
+    const { ctx, writes } = makeContext(noId);
+    let fetched = false;
+    const err = await withMockedFetch(
+      () => {
+        fetched = true;
+        return new Response("{}", { status: 200 });
+      },
+      async () => {
+        try {
+          // deno-lint-ignore no-explicit-any
+          await (model.methods[method].execute as any)({}, ctx);
+          return null;
+        } catch (e) {
+          return e as Error;
+        }
+      },
+    );
+    assert(err !== null, `${method} should throw when secretId is missing`);
+    assertStringIncludes(err.message, "secretId");
+    assertStringIncludes(err.message, method);
+    // Guard runs before any network call or write.
+    assertEquals(fetched, false);
+    assertEquals(writes.length, 0);
+  });
+}

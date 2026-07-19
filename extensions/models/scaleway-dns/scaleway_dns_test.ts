@@ -15,7 +15,7 @@ const G = {
 
 // deno-lint-ignore no-explicit-any
 type AnyCtx = any;
-function makeContext(): {
+function makeContext(globalArgsOverride?: Record<string, unknown>): {
   ctx: AnyCtx;
   writes: Array<{ spec: string; name: string; data: Record<string, unknown> }>;
 } {
@@ -23,7 +23,7 @@ function makeContext(): {
     { spec: string; name: string; data: Record<string, unknown> }
   > = [];
   const ctx = {
-    globalArgs: G,
+    globalArgs: { ...G, ...(globalArgsOverride ?? {}) },
     logger: { info: () => {}, warn: () => {} },
     writeResource: (
       spec: string,
@@ -193,6 +193,123 @@ Deno.test("update PATCHes the changes body and snapshots returned records", asyn
   assertEquals(sent.changes[0].add.records[0].name, "api");
   assertEquals(writes[0].spec, "record");
   assertEquals(writes[0].data.data, "203.0.113.9");
+});
+
+Deno.test("create derives subdomain+domain from a child dnsZone and POSTs the new zone", async () => {
+  // dnsZone is a child zone → subdomain "test", domain "example.com".
+  const { ctx, writes } = makeContext({ dnsZone: "test.example.com" });
+  let captured: { url: string; init: RequestInit } | null = null;
+  await withMockedFetch(
+    (url, init) => {
+      captured = { url, init };
+      return new Response(
+        JSON.stringify({
+          domain: "example.com",
+          subdomain: "test",
+          status: "pending",
+          project_id: G.projectId,
+          ns: ["ns0.dom.scw.cloud", "ns1.dom.scw.cloud"],
+        }),
+        { status: 200 },
+      );
+    },
+    () => model.methods.create.execute({}, ctx),
+  );
+  const call = captured as unknown as { url: string; init: RequestInit };
+  assertEquals(call.init.method, "POST");
+  assertStringIncludes(call.url, "/domain/v2beta1/dns-zones");
+  assert(!call.url.includes("/zones/"));
+  assert(!call.url.includes("/regions/"));
+  const sent = JSON.parse(String(call.init.body));
+  assertEquals(sent.domain, "example.com"); // first label of dnsZone stripped
+  assertEquals(sent.subdomain, "test");
+  assertEquals(sent.project_id, G.projectId);
+  assertEquals(writes[0].spec, "zone");
+  assertEquals(writes[0].name, "test.example.com"); // key = subdomain.domain
+  assertEquals(writes[0].data.status, "pending");
+  assertEquals(writes[0].data.projectId, G.projectId);
+});
+
+Deno.test("create refuses an apex dnsZone (Scaleway CreateDNSZone requires a subdomain)", async () => {
+  const { ctx, writes } = makeContext({ dnsZone: "example.com" });
+  let threw = false;
+  await withMockedFetch(
+    () => new Response("{}", { status: 200 }),
+    async () => {
+      try {
+        await model.methods.create.execute({}, ctx);
+      } catch (e) {
+        threw = true;
+        assertStringIncludes((e as Error).message, "apex");
+      }
+    },
+  );
+  assert(threw);
+  assertEquals(writes.length, 0); // no API call snapshot on a pre-flight refusal
+});
+
+Deno.test("create honors an explicit subdomain and keys the snapshot as sub.domain", async () => {
+  const { ctx, writes } = makeContext();
+  let sentBody: Record<string, unknown> = {};
+  await withMockedFetch(
+    (_url, init) => {
+      sentBody = JSON.parse(String(init.body));
+      return new Response(
+        JSON.stringify({
+          domain: "example.com",
+          subdomain: "test",
+          status: "pending",
+          project_id: G.projectId,
+        }),
+        { status: 200 },
+      );
+    },
+    () => model.methods.create.execute({ subdomain: "test" }, ctx),
+  );
+  assertEquals(sentBody.subdomain, "test");
+  assertEquals(writes[0].name, "test.example.com");
+});
+
+Deno.test("delete DELETEs the zone via query params and snapshots the returned state", async () => {
+  const { ctx, writes } = makeContext();
+  let captured: { url: string; init: RequestInit } | null = null;
+  await withMockedFetch(
+    (url, init) => {
+      captured = { url, init };
+      return new Response(
+        JSON.stringify({
+          domain: "example.com",
+          status: "deleting",
+          project_id: G.projectId,
+        }),
+        { status: 200 },
+      );
+    },
+    () => model.methods.delete.execute({}, ctx),
+  );
+  const call = captured as unknown as { url: string; init: RequestInit };
+  assertEquals(call.init.method, "DELETE");
+  assertStringIncludes(call.url, "/domain/v2beta1/dns-zones?dns_zone=example.com");
+  assertStringIncludes(call.url, `project_id=${G.projectId}`);
+  assert(!call.url.includes("/zones/"));
+  assert(!call.url.includes("/regions/"));
+  assertEquals(writes[0].spec, "zone");
+  assertEquals(writes[0].name, "example.com");
+  assertEquals(writes[0].data.status, "deleting");
+});
+
+Deno.test("delete treats a 404 as success (idempotent) and marks the zone deleted", async () => {
+  const { ctx, writes } = makeContext();
+  await withMockedFetch(
+    () =>
+      new Response(JSON.stringify({ message: "not found" }), { status: 404 }),
+    () => model.methods.delete.execute({}, ctx),
+  );
+  assertEquals(writes.length, 1);
+  assertEquals(writes[0].spec, "zone");
+  assertEquals(writes[0].name, "example.com");
+  assertEquals(writes[0].data.domain, "example.com");
+  assertEquals(writes[0].data.status, "deleted");
 });
 
 Deno.test("zone-specified check fails on blank dnsZone and passes when set", () => {

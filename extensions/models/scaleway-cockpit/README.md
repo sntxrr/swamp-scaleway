@@ -1,8 +1,8 @@
 # @sntxrr/scaleway-cockpit
 
-A [swamp](https://swamp-club.com) model for a **Scaleway Cockpit
-(Observability) data source** — one model instance per data source, keyed by
-its data source ID. Wraps the
+A [swamp](https://swamp-club.com) model for a **Scaleway Cockpit (Observability)
+data source** — one model instance per data source, keyed by its data source ID.
+Wraps the
 [Scaleway Cockpit API](https://www.scaleway.com/en/developers/api/cockpit/regional-api/)
 (`/cockpit/v1`, regional) using only Deno's built-in `fetch` — no SDK.
 Authenticated with the `X-Auth-Token` header (secret key wired from a vault). A
@@ -11,13 +11,13 @@ ingestion clients read from and write to.
 
 ## Methods
 
-| Method        | What it does                                                                    |
-| ------------- | ------------------------------------------------------------------------------- |
-| `sync`        | Fetch the data source's current state (`GetDataSource`) and store a snapshot     |
-| `create`      | Provision a new data source (`CreateDataSource`) and snapshot it                 |
-| `delete`      | Deprovision the data source (`DeleteDataSource`); a 404 is treated as success    |
-| `list`        | Factory discovery — snapshot every data source in the region (paginated)         |
-| `list-tokens` | Factory discovery — snapshot every Cockpit token's non-secret metadata           |
+| Method        | What it does                                                                  |
+| ------------- | ----------------------------------------------------------------------------- |
+| `sync`        | Fetch the data source's current state (`GetDataSource`) and store a snapshot  |
+| `create`      | Provision a new data source (`CreateDataSource`) and snapshot it              |
+| `delete`      | Deprovision the data source (`DeleteDataSource`); a 404 is treated as success |
+| `list`        | Factory discovery — snapshot every data source in the region (paginated)      |
+| `list-tokens` | Factory discovery — snapshot every Cockpit token's non-secret metadata        |
 
 ## Secret handling
 
@@ -59,13 +59,13 @@ swamp model @sntxrr/scaleway-cockpit method run list-tokens main-metrics
 
 ## Global arguments
 
-| Arg            | Required | Default                    | Description                                            |
-| -------------- | -------- | -------------------------- | ------------------------------------------------------ |
-| `secretKey`    | yes      | —                          | Scaleway API secret key (sensitive; wire from a vault) |
-| `projectId`    | yes      | —                          | Project ID that owns the data sources and tokens       |
-| `region`       | no       | `fr-par`                   | Region (`fr-par`, `nl-ams`, `pl-waw`)                  |
-| `dataSourceId` | yes      | —                          | ID of the data source this model manages               |
-| `endpoint`     | no       | `https://api.scaleway.com` | Override the API host                                  |
+| Arg            | Required    | Default                    | Description                                                                                             |
+| -------------- | ----------- | -------------------------- | ------------------------------------------------------------------------------------------------------- |
+| `secretKey`    | yes         | —                          | Scaleway API secret key (sensitive; wire from a vault)                                                  |
+| `projectId`    | yes         | —                          | Project ID that owns the data sources and tokens                                                        |
+| `region`       | no          | `fr-par`                   | Region (`fr-par`, `nl-ams`, `pl-waw`)                                                                   |
+| `dataSourceId` | conditional | —                          | ID of the data source this model manages. Required by every method except `create`, which provisions it |
+| `endpoint`     | no          | `https://api.scaleway.com` | Override the API host                                                                                   |
 
 ## Development
 

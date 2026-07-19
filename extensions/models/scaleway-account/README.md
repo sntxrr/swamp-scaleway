@@ -15,13 +15,13 @@ Authenticated with the `X-Auth-Token` header (secret key wired from a vault).
 
 ## Methods
 
-| Method   | What it does                                                                                        |
-| -------- | -------------------------------------------------------------------------------------------------- |
-| `sync`   | Fetch the managed Project's current state (`GetProject`) and store a snapshot                       |
-| `create` | Provision a new Project (`CreateProject`, POST) and snapshot it under its new ID                    |
-| `update` | Mutate the Project's mutable fields (`UpdateProject`, PATCH) and re-snapshot                        |
-| `delete` | Deprovision the Project (`DeleteProject`) — idempotent (a `404` is treated as already gone)         |
-| `list`   | Factory discovery — snapshot every Project in the Organization (paginated)                          |
+| Method   | What it does                                                                                |
+| -------- | ------------------------------------------------------------------------------------------- |
+| `sync`   | Fetch the managed Project's current state (`GetProject`) and store a snapshot               |
+| `create` | Provision a new Project (`CreateProject`, POST) and snapshot it under its new ID            |
+| `update` | Mutate the Project's mutable fields (`UpdateProject`, PATCH) and re-snapshot                |
+| `delete` | Deprovision the Project (`DeleteProject`) — idempotent (a `404` is treated as already gone) |
+| `list`   | Factory discovery — snapshot every Project in the Organization (paginated)                  |
 
 The mutating verbs (`create`/`update`/`delete`) auto-run the labeled
 `org-specified` pre-flight check, which fails fast if `organizationId` is empty.
@@ -63,12 +63,12 @@ fires the `org-specified` pre-flight check first.
 
 ## Global arguments
 
-| Arg              | Required | Default                    | Description                                             |
-| ---------------- | -------- | -------------------------- | ------------------------------------------------------- |
-| `secretKey`      | yes      | —                          | Scaleway API secret key (sensitive; wire from a vault)  |
-| `organizationId` | yes      | —                          | Organization ID that owns the Project (create/list)     |
-| `projectId`      | yes      | —                          | Account Project ID this model manages                   |
-| `endpoint`       | no       | `https://api.scaleway.com` | Override the API host                                   |
+| Arg              | Required    | Default                    | Description                                                                                          |
+| ---------------- | ----------- | -------------------------- | ---------------------------------------------------------------------------------------------------- |
+| `secretKey`      | yes         | —                          | Scaleway API secret key (sensitive; wire from a vault)                                               |
+| `organizationId` | yes         | —                          | Organization ID that owns the Project (create/list)                                                  |
+| `projectId`      | conditional | —                          | Account Project ID this model manages. Required by every method except `create`, which provisions it |
+| `endpoint`       | no          | `https://api.scaleway.com` | Override the API host                                                                                |
 
 > No `zone`/`region` argument — the Account API is global. Scope is the
 > **Organization**.

@@ -31,8 +31,9 @@ const GlobalArgsSchema = z.object({
   region: z.string().default("fr-par").describe(
     "Region, e.g. fr-par, nl-ams, pl-waw.",
   ),
-  keyId: z.string().describe(
-    "ID of the Key Manager key this model manages.",
+  keyId: z.string().optional().describe(
+    "ID of the Key Manager key this model manages. Optional — `create` " +
+      "provisions a new key and returns its ID; every other method requires it.",
   ),
   endpoint: z.string().optional().describe(
     "Override the API host. Defaults to https://api.scaleway.com.",
@@ -245,7 +246,10 @@ function toKeyResource(
   observedAt: string,
 ): Record<string, unknown> {
   return {
-    id: (k.id as string) ?? g.keyId,
+    // Callers always supply an id: API responses carry one, and the delete
+    // path passes the guarded keyId. The final "" is unreachable defensive
+    // padding so the snapshot still satisfies KeySchema's required id.
+    id: (k.id as string) ?? g.keyId ?? "",
     name: (k.name as string) ?? null,
     state: (k.state as string) ?? "unknown",
     usage: (k.usage as Record<string, unknown>) ?? null,
@@ -265,11 +269,31 @@ function toKeyResource(
 const keysPath = (g: GlobalArgs): string =>
   `/key-manager/v1alpha1/regions/${g.region}/keys`;
 
+/**
+ * Resolve the managed key ID for methods that act on an *existing* key.
+ *
+ * `keyId` is optional in the global schema because `create` provisions the key
+ * and learns its ID from the API — requiring it up front would force callers to
+ * pass a throwaway placeholder just to satisfy validation. Methods that read,
+ * mutate, or perform cryptographic operations on an existing key call this to
+ * fail fast with an actionable message.
+ */
+function requireKeyId(g: GlobalArgs, method: string): string {
+  if (!g.keyId) {
+    throw new Error(
+      `The "${method}" method requires globalArgs.keyId — the ID of an ` +
+        `existing Key Manager key. Set keyId on the model, or run "create" ` +
+        `first to provision one.`,
+    );
+  }
+  return g.keyId;
+}
+
 // --- Model -----------------------------------------------------------------
 /** Scaleway Key Manager model — one instance per key, keyed by keyId. */
 export const model = {
   type: "@sntxrr/scaleway-key-manager",
-  version: "2026.07.19.1",
+  version: "2026.07.19.2",
   globalArguments: GlobalArgsSchema,
   resources: {
     "key": {
@@ -325,18 +349,19 @@ export const model = {
         context: ExecuteContext,
       ): Promise<{ dataHandles: Array<{ name: string }> }> => {
         const { globalArgs: g, logger } = context;
-        logger.info("Syncing Scaleway KMS key {id}", { id: g.keyId });
+        const keyId = requireKeyId(g, "sync");
+        logger.info("Syncing Scaleway KMS key {id}", { id: keyId });
         const res = await scalewayFetch<Record<string, unknown>>(
           g,
           "GET",
-          `${keysPath(g)}/${encodeURIComponent(g.keyId)}`,
+          `${keysPath(g)}/${encodeURIComponent(keyId)}`,
         );
         const handle = await context.writeResource(
           "key",
-          g.keyId,
+          keyId,
           toKeyResource(res, g, new Date().toISOString()),
         );
-        logger.info("Synced Scaleway KMS key {id}", { id: g.keyId });
+        logger.info("Synced Scaleway KMS key {id}", { id: keyId });
         return { dataHandles: [handle] };
       },
     },
@@ -366,7 +391,9 @@ export const model = {
           keysPath(g),
           body,
         );
-        const newId = (res.id as string) ?? g.keyId;
+        // CreateKey always returns the new ID; fall back to a preset keyId only
+        // if the caller pinned one, so create never depends on it being set.
+        const newId = (res.id as string) ?? g.keyId ?? "";
         const handle = await context.writeResource(
           "key",
           newId,
@@ -387,7 +414,8 @@ export const model = {
         context: ExecuteContext,
       ): Promise<{ dataHandles: Array<{ name: string }> }> => {
         const { globalArgs: g, logger } = context;
-        logger.info("Deleting Scaleway KMS key {id}", { id: g.keyId });
+        const keyId = requireKeyId(g, "delete");
+        logger.info("Deleting Scaleway KMS key {id}", { id: keyId });
         // Idempotent delete: a 404 means the key is already gone — treat it as
         // success and record an absent snapshot (CONVENTIONS.md §3.2).
         let res: Record<string, unknown> | undefined;
@@ -396,7 +424,7 @@ export const model = {
           res = await scalewayFetch<Record<string, unknown>>(
             g,
             "DELETE",
-            `${keysPath(g)}/${encodeURIComponent(g.keyId)}`,
+            `${keysPath(g)}/${encodeURIComponent(keyId)}`,
           );
         } catch (e) {
           // Idempotent delete: already-gone → success. Scaleway signals this as
@@ -412,11 +440,11 @@ export const model = {
         }
         const observedAt = new Date().toISOString();
         const snapshot = absent
-          ? toKeyResource({ id: g.keyId, state: "absent" }, g, observedAt)
-          : toKeyResource(res ?? { id: g.keyId }, g, observedAt);
-        const handle = await context.writeResource("key", g.keyId, snapshot);
+          ? toKeyResource({ id: keyId, state: "absent" }, g, observedAt)
+          : toKeyResource(res ?? { id: keyId }, g, observedAt);
+        const handle = await context.writeResource("key", keyId, snapshot);
         logger.info("Deleted Scaleway KMS key {id} (absent={absent})", {
-          id: g.keyId,
+          id: keyId,
           absent,
         });
         return { dataHandles: [handle] };
@@ -431,8 +459,9 @@ export const model = {
         context: ExecuteContext,
       ): Promise<{ dataHandles: Array<{ name: string }> }> => {
         const { globalArgs: g, logger } = context;
+        const keyId = requireKeyId(g, "encrypt");
         // Never log the plaintext; log only the key ID.
-        logger.info("Encrypting with Scaleway KMS key {id}", { id: g.keyId });
+        logger.info("Encrypting with Scaleway KMS key {id}", { id: keyId });
         const body: Record<string, unknown> = { plaintext: args.plaintext };
         if (args.associatedData !== undefined) {
           body.associated_data = args.associatedData;
@@ -440,17 +469,17 @@ export const model = {
         const res = await scalewayFetch<Record<string, unknown>>(
           g,
           "POST",
-          `${keysPath(g)}/${encodeURIComponent(g.keyId)}/encrypt`,
+          `${keysPath(g)}/${encodeURIComponent(keyId)}/encrypt`,
           body,
         );
         // Snapshot only the non-secret ciphertext — never the plaintext.
-        const handle = await context.writeResource("cipher", g.keyId, {
-          keyId: (res.key_id as string) ?? g.keyId,
+        const handle = await context.writeResource("cipher", keyId, {
+          keyId: (res.key_id as string) ?? keyId,
           ciphertext: (res.ciphertext as string) ?? "",
           associatedDataUsed: args.associatedData !== undefined,
           observedAt: new Date().toISOString(),
         });
-        logger.info("Encrypted with Scaleway KMS key {id}", { id: g.keyId });
+        logger.info("Encrypted with Scaleway KMS key {id}", { id: keyId });
         return { dataHandles: [handle] };
       },
     },
@@ -463,7 +492,8 @@ export const model = {
         context: ExecuteContext,
       ): Promise<{ dataHandles: Array<{ name: string }> }> => {
         const { globalArgs: g, logger } = context;
-        logger.info("Decrypting with Scaleway KMS key {id}", { id: g.keyId });
+        const keyId = requireKeyId(g, "decrypt");
+        logger.info("Decrypting with Scaleway KMS key {id}", { id: keyId });
         const body: Record<string, unknown> = { ciphertext: args.ciphertext };
         if (args.associatedData !== undefined) {
           body.associated_data = args.associatedData;
@@ -471,17 +501,17 @@ export const model = {
         const res = await scalewayFetch<Record<string, unknown>>(
           g,
           "POST",
-          `${keysPath(g)}/${encodeURIComponent(g.keyId)}/decrypt`,
+          `${keysPath(g)}/${encodeURIComponent(keyId)}/decrypt`,
           body,
         );
         // Recovered plaintext is returned ONLY via the sensitive `plaintext`
         // field; it is never logged and never written to the key snapshot.
-        const handle = await context.writeResource("plaintext", g.keyId, {
-          keyId: (res.key_id as string) ?? g.keyId,
+        const handle = await context.writeResource("plaintext", keyId, {
+          keyId: (res.key_id as string) ?? keyId,
           plaintext: (res.plaintext as string) ?? "",
           observedAt: new Date().toISOString(),
         });
-        logger.info("Decrypted with Scaleway KMS key {id}", { id: g.keyId });
+        logger.info("Decrypted with Scaleway KMS key {id}", { id: keyId });
         return { dataHandles: [handle] };
       },
     },
@@ -493,18 +523,19 @@ export const model = {
         context: ExecuteContext,
       ): Promise<{ dataHandles: Array<{ name: string }> }> => {
         const { globalArgs: g, logger } = context;
-        logger.info("Rotating Scaleway KMS key {id}", { id: g.keyId });
+        const keyId = requireKeyId(g, "rotate");
+        logger.info("Rotating Scaleway KMS key {id}", { id: keyId });
         const res = await scalewayFetch<Record<string, unknown>>(
           g,
           "POST",
-          `${keysPath(g)}/${encodeURIComponent(g.keyId)}/rotate`,
+          `${keysPath(g)}/${encodeURIComponent(keyId)}/rotate`,
         );
         const handle = await context.writeResource(
           "key",
-          g.keyId,
+          keyId,
           toKeyResource(res, g, new Date().toISOString()),
         );
-        logger.info("Rotated Scaleway KMS key {id}", { id: g.keyId });
+        logger.info("Rotated Scaleway KMS key {id}", { id: keyId });
         return { dataHandles: [handle] };
       },
     },
@@ -518,18 +549,19 @@ export const model = {
         context: ExecuteContext,
       ): Promise<{ dataHandles: Array<{ name: string }> }> => {
         const { globalArgs: g, logger } = context;
-        logger.info("Protecting Scaleway KMS key {id}", { id: g.keyId });
+        const keyId = requireKeyId(g, "protect");
+        logger.info("Protecting Scaleway KMS key {id}", { id: keyId });
         const res = await scalewayFetch<Record<string, unknown>>(
           g,
           "POST",
-          `${keysPath(g)}/${encodeURIComponent(g.keyId)}/protect`,
+          `${keysPath(g)}/${encodeURIComponent(keyId)}/protect`,
         );
         const handle = await context.writeResource(
           "key",
-          g.keyId,
+          keyId,
           toKeyResource(res, g, new Date().toISOString()),
         );
-        logger.info("Protected Scaleway KMS key {id}", { id: g.keyId });
+        logger.info("Protected Scaleway KMS key {id}", { id: keyId });
         return { dataHandles: [handle] };
       },
     },
@@ -543,18 +575,19 @@ export const model = {
         context: ExecuteContext,
       ): Promise<{ dataHandles: Array<{ name: string }> }> => {
         const { globalArgs: g, logger } = context;
-        logger.info("Unprotecting Scaleway KMS key {id}", { id: g.keyId });
+        const keyId = requireKeyId(g, "unprotect");
+        logger.info("Unprotecting Scaleway KMS key {id}", { id: keyId });
         const res = await scalewayFetch<Record<string, unknown>>(
           g,
           "POST",
-          `${keysPath(g)}/${encodeURIComponent(g.keyId)}/unprotect`,
+          `${keysPath(g)}/${encodeURIComponent(keyId)}/unprotect`,
         );
         const handle = await context.writeResource(
           "key",
-          g.keyId,
+          keyId,
           toKeyResource(res, g, new Date().toISOString()),
         );
-        logger.info("Unprotected Scaleway KMS key {id}", { id: g.keyId });
+        logger.info("Unprotected Scaleway KMS key {id}", { id: keyId });
         return { dataHandles: [handle] };
       },
     },

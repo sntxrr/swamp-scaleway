@@ -1,0 +1,239 @@
+id: db90b346-54d1-450e-b53e-3e0fcee062c6
+name: fleet-inventory
+description: >-
+  Read-only sweep of a Scaleway project, producing a fresh data snapshot per
+  resource. Every step calls a factory `list` method, so one step discovers all
+  resources of that type — no per-resource looping and no lock contention.
+
+  Steps are best-effort (allowFailure): a service the project doesn't use, or
+  lacks permission for, degrades that one step instead of failing the sweep.
+
+  Jobs split by API scoping because Scaleway scopes these services differently
+  (region vs availability zone). The two jobs are independent and run
+  concurrently. Each step targets a distinct model type AND a distinct
+  modelName, so no two steps serialise on the same per-model lock.
+
+  Because swamp versions every data write, re-running this on a schedule turns
+  the snapshots into a drift record — `swamp data list <name>` shows what
+  changed between sweeps.
+tags: {}
+
+# Scheduled runs get no --input, so trigger.inputs supplies the baseline.
+# Precedence: caller --input > trigger.inputs > schema defaults.
+trigger:
+  schedule: "0 6 * * *"
+  inputs:
+    projectId: ba69f52d-b3fa-445e-942d-6614ff9f5ceb
+
+inputs:
+  properties:
+    projectId:
+      type: string
+      description: Scaleway Project ID to inventory.
+    region:
+      type: string
+      default: fr-par
+      description: Region for region-scoped services (fr-par, nl-ams, pl-waw).
+    zone:
+      type: string
+      default: fr-par-1
+      description: Availability zone for zone-scoped services (e.g. fr-par-1).
+  required: ["projectId"]
+
+jobs:
+  - name: region-scoped
+    description: Inventory services whose API is scoped by region.
+    # Politeness cap on concurrent Scaleway API calls.
+    concurrency: 4
+    dependsOn: []
+    weight: 0
+    steps:
+      - name: list-vpcs
+        description: Discover every VPC in the region.
+        task:
+          type: model_method
+          modelType: "@sntxrr/scaleway-vpc"
+          modelName: inv-vpc
+          methodName: list
+          inputs:
+            secretKey: ${{ vault.get(scaleway, SCW_SECRET_KEY) }}
+            projectId: ${{ inputs.projectId }}
+            region: ${{ inputs.region }}
+        dependsOn: []
+        weight: 0
+        allowFailure: true
+
+      - name: list-ips
+        description: Discover every IPAM-managed IP address in the region.
+        task:
+          type: model_method
+          modelType: "@sntxrr/scaleway-ipam"
+          modelName: inv-ipam
+          methodName: list
+          inputs:
+            secretKey: ${{ vault.get(scaleway, SCW_SECRET_KEY) }}
+            projectId: ${{ inputs.projectId }}
+            region: ${{ inputs.region }}
+        dependsOn: []
+        weight: 0
+        allowFailure: true
+
+      - name: list-databases
+        description: Discover every managed RDB instance in the region.
+        task:
+          type: model_method
+          modelType: "@sntxrr/scaleway-rdb"
+          modelName: inv-rdb
+          methodName: list
+          inputs:
+            secretKey: ${{ vault.get(scaleway, SCW_SECRET_KEY) }}
+            projectId: ${{ inputs.projectId }}
+            region: ${{ inputs.region }}
+        dependsOn: []
+        weight: 0
+        allowFailure: true
+
+      - name: list-registry-namespaces
+        description: Discover every Container Registry namespace in the region.
+        task:
+          type: model_method
+          modelType: "@sntxrr/scaleway-registry"
+          modelName: inv-registry
+          methodName: list
+          inputs:
+            secretKey: ${{ vault.get(scaleway, SCW_SECRET_KEY) }}
+            projectId: ${{ inputs.projectId }}
+            region: ${{ inputs.region }}
+        dependsOn: []
+        weight: 0
+        allowFailure: true
+
+      - name: list-secrets
+        description: >-
+          Discover every Secret Manager secret in the region. Metadata only —
+          secret values are never fetched or snapshotted.
+        task:
+          type: model_method
+          modelType: "@sntxrr/scaleway-secret-manager"
+          modelName: inv-secret-manager
+          methodName: list
+          inputs:
+            secretKey: ${{ vault.get(scaleway, SCW_SECRET_KEY) }}
+            projectId: ${{ inputs.projectId }}
+            region: ${{ inputs.region }}
+        dependsOn: []
+        weight: 0
+        allowFailure: true
+
+      - name: list-containers
+        description: Discover every Serverless Container in the region.
+        task:
+          type: model_method
+          modelType: "@sntxrr/scaleway-serverless-containers"
+          modelName: inv-serverless-containers
+          methodName: list
+          inputs:
+            secretKey: ${{ vault.get(scaleway, SCW_SECRET_KEY) }}
+            projectId: ${{ inputs.projectId }}
+            region: ${{ inputs.region }}
+        dependsOn: []
+        weight: 0
+        allowFailure: true
+
+      - name: list-kapsule-clusters
+        description: Discover every Kubernetes Kapsule cluster in the region.
+        task:
+          type: model_method
+          modelType: "@sntxrr/scaleway-kapsule"
+          modelName: inv-kapsule
+          methodName: list
+          inputs:
+            secretKey: ${{ vault.get(scaleway, SCW_SECRET_KEY) }}
+            projectId: ${{ inputs.projectId }}
+            region: ${{ inputs.region }}
+        dependsOn: []
+        weight: 0
+        allowFailure: true
+
+  - name: zone-scoped
+    description: Inventory services whose API is scoped by availability zone.
+    concurrency: 4
+    dependsOn: []
+    weight: 0
+    steps:
+      - name: list-servers
+        description: Discover every Instance server in the zone.
+        task:
+          type: model_method
+          modelType: "@sntxrr/scaleway-instance"
+          modelName: inv-instance
+          methodName: list
+          inputs:
+            secretKey: ${{ vault.get(scaleway, SCW_SECRET_KEY) }}
+            projectId: ${{ inputs.projectId }}
+            zone: ${{ inputs.zone }}
+        dependsOn: []
+        weight: 0
+        allowFailure: true
+
+      - name: list-volumes
+        description: Discover every Block Storage volume in the zone.
+        task:
+          type: model_method
+          modelType: "@sntxrr/scaleway-block-storage"
+          modelName: inv-block-storage
+          methodName: list
+          inputs:
+            secretKey: ${{ vault.get(scaleway, SCW_SECRET_KEY) }}
+            projectId: ${{ inputs.projectId }}
+            zone: ${{ inputs.zone }}
+        dependsOn: []
+        weight: 0
+        allowFailure: true
+
+      - name: list-gateways
+        description: Discover every Public Gateway in the zone.
+        task:
+          type: model_method
+          modelType: "@sntxrr/scaleway-public-gateway"
+          modelName: inv-public-gateway
+          methodName: list
+          inputs:
+            secretKey: ${{ vault.get(scaleway, SCW_SECRET_KEY) }}
+            projectId: ${{ inputs.projectId }}
+            zone: ${{ inputs.zone }}
+        dependsOn: []
+        weight: 0
+        allowFailure: true
+
+      - name: list-load-balancers
+        description: Discover every Load Balancer in the zone.
+        task:
+          type: model_method
+          modelType: "@sntxrr/scaleway-load-balancer"
+          modelName: inv-load-balancer
+          methodName: list
+          inputs:
+            secretKey: ${{ vault.get(scaleway, SCW_SECRET_KEY) }}
+            projectId: ${{ inputs.projectId }}
+            zone: ${{ inputs.zone }}
+        dependsOn: []
+        weight: 0
+        allowFailure: true
+
+      - name: list-redis-clusters
+        description: Discover every Redis cluster in the zone.
+        task:
+          type: model_method
+          modelType: "@sntxrr/scaleway-redis"
+          modelName: inv-redis
+          methodName: list
+          inputs:
+            secretKey: ${{ vault.get(scaleway, SCW_SECRET_KEY) }}
+            projectId: ${{ inputs.projectId }}
+            zone: ${{ inputs.zone }}
+        dependsOn: []
+        weight: 0
+        allowFailure: true
+
+version: 1

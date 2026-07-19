@@ -1,7 +1,7 @@
 manifestVersion: 1
 
 name: "@sntxrr/scaleway-redis"
-version: "2026.07.18.1"
+version: "2026.07.19.1"
 description: "Manage a Scaleway Managed Database for Redis cluster — sync state, create, update, and delete Redis clusters, and discover clusters in a zone, via the Redis API with X-Auth-Token auth."
 repository: "https://github.com/sntxrr/swamp-scaleway"
 

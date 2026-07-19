@@ -25,8 +25,10 @@ const GlobalArgsSchema = z.object({
   region: z.string().default("fr-par").describe(
     "Region, e.g. fr-par, nl-ams, pl-waw.",
   ),
-  filesystemId: z.string().describe(
-    "ID of the File Storage filesystem this model manages.",
+  filesystemId: z.string().optional().describe(
+    "ID of the File Storage filesystem this model manages. Optional — " +
+      "`create` provisions a new filesystem and returns its ID; every other " +
+      "method requires it.",
   ),
   endpoint: z.string().optional().describe(
     "Override the API host. Defaults to https://api.scaleway.com.",
@@ -197,7 +199,11 @@ function toFilesystemResource(
   observedAt: string,
 ): Record<string, unknown> {
   return {
-    id: (f.id as string) ?? g.filesystemId,
+    // Callers always supply an id: API responses carry one, and the delete
+    // path passes the guarded filesystemId. The final "" is unreachable
+    // defensive padding so the snapshot still satisfies FilesystemSchema's
+    // required id.
+    id: (f.id as string) ?? g.filesystemId ?? "",
     name: (f.name as string) ?? null,
     status: (f.status as string) ?? "unknown",
     size: (f.size as number) ?? null,
@@ -216,11 +222,32 @@ function toFilesystemResource(
 const filesystemsPath = (g: GlobalArgs): string =>
   `/file/v1alpha1/regions/${g.region}/filesystems`;
 
+/**
+ * Resolve the managed filesystem ID for methods that act on an *existing*
+ * filesystem.
+ *
+ * `filesystemId` is optional in the global schema because `create` provisions
+ * the filesystem and learns its ID from the API — requiring it up front would
+ * force callers to pass a throwaway placeholder just to satisfy validation.
+ * Methods that read or mutate an existing filesystem call this to fail fast
+ * with an actionable message.
+ */
+function requireFilesystemId(g: GlobalArgs, method: string): string {
+  if (!g.filesystemId) {
+    throw new Error(
+      `The "${method}" method requires globalArgs.filesystemId — the ID of an ` +
+        `existing filesystem. Set filesystemId on the model, or run "create" ` +
+        `first to provision one.`,
+    );
+  }
+  return g.filesystemId;
+}
+
 // --- Model -----------------------------------------------------------------
 /** Scaleway File Storage model — one instance per filesystem, keyed by filesystemId. */
 export const model = {
   type: "@sntxrr/scaleway-file-storage",
-  version: "2026.07.18.1",
+  version: "2026.07.19.1",
   globalArguments: GlobalArgsSchema,
   resources: {
     "filesystem": {
@@ -263,20 +290,21 @@ export const model = {
         context: ExecuteContext,
       ): Promise<{ dataHandles: Array<{ name: string }> }> => {
         const { globalArgs: g, logger } = context;
+        const filesystemId = requireFilesystemId(g, "sync");
         logger.info("Syncing Scaleway filesystem {id}", {
-          id: g.filesystemId,
+          id: filesystemId,
         });
         const res = await scalewayFetch<Record<string, unknown>>(
           g,
           "GET",
-          `${filesystemsPath(g)}/${encodeURIComponent(g.filesystemId)}`,
+          `${filesystemsPath(g)}/${encodeURIComponent(filesystemId)}`,
         );
         const handle = await context.writeResource(
           "filesystem",
-          g.filesystemId,
+          filesystemId,
           toFilesystemResource(res, g, new Date().toISOString()),
         );
-        logger.info("Synced Scaleway filesystem {id}", { id: g.filesystemId });
+        logger.info("Synced Scaleway filesystem {id}", { id: filesystemId });
         return { dataHandles: [handle] };
       },
     },
@@ -306,7 +334,10 @@ export const model = {
           filesystemsPath(g),
           body,
         );
-        const newId = (res.id as string) ?? g.filesystemId;
+        // CreateFileSystem always returns the new ID; fall back to a preset
+        // filesystemId only if the caller pinned one, so create never depends
+        // on it being set.
+        const newId = (res.id as string) ?? g.filesystemId ?? "";
         const handle = await context.writeResource(
           "filesystem",
           newId,
@@ -328,8 +359,9 @@ export const model = {
         context: ExecuteContext,
       ): Promise<{ dataHandles: Array<{ name: string }> }> => {
         const { globalArgs: g, logger } = context;
+        const filesystemId = requireFilesystemId(g, "update");
         logger.info("Updating Scaleway filesystem {id}", {
-          id: g.filesystemId,
+          id: filesystemId,
         });
         const body: Record<string, unknown> = {};
         if (args.name !== undefined) body.name = args.name;
@@ -338,15 +370,15 @@ export const model = {
         const res = await scalewayFetch<Record<string, unknown>>(
           g,
           "PATCH",
-          `${filesystemsPath(g)}/${encodeURIComponent(g.filesystemId)}`,
+          `${filesystemsPath(g)}/${encodeURIComponent(filesystemId)}`,
           body,
         );
         const handle = await context.writeResource(
           "filesystem",
-          g.filesystemId,
+          filesystemId,
           toFilesystemResource(res, g, new Date().toISOString()),
         );
-        logger.info("Updated Scaleway filesystem {id}", { id: g.filesystemId });
+        logger.info("Updated Scaleway filesystem {id}", { id: filesystemId });
         return { dataHandles: [handle] };
       },
     },
@@ -358,8 +390,9 @@ export const model = {
         context: ExecuteContext,
       ): Promise<{ dataHandles: Array<{ name: string }> }> => {
         const { globalArgs: g, logger } = context;
+        const filesystemId = requireFilesystemId(g, "delete");
         logger.info("Deleting Scaleway filesystem {id}", {
-          id: g.filesystemId,
+          id: filesystemId,
         });
         // Idempotent delete: a 404 means the filesystem is already gone — treat
         // it as success and record an absent snapshot (CONVENTIONS.md §3.2).
@@ -369,7 +402,7 @@ export const model = {
           await scalewayFetch<Record<string, unknown>>(
             g,
             "DELETE",
-            `${filesystemsPath(g)}/${encodeURIComponent(g.filesystemId)}`,
+            `${filesystemsPath(g)}/${encodeURIComponent(filesystemId)}`,
           );
         } catch (e) {
           if ((e as { status?: number }).status !== 404) throw e;
@@ -377,17 +410,17 @@ export const model = {
         }
         const observedAt = new Date().toISOString();
         const snapshot = toFilesystemResource(
-          { id: g.filesystemId, status: absent ? "absent" : "deleting" },
+          { id: filesystemId, status: absent ? "absent" : "deleting" },
           g,
           observedAt,
         );
         const handle = await context.writeResource(
           "filesystem",
-          g.filesystemId,
+          filesystemId,
           snapshot,
         );
         logger.info("Deleted Scaleway filesystem {id} (absent={absent})", {
-          id: g.filesystemId,
+          id: filesystemId,
           absent,
         });
         return { dataHandles: [handle] };

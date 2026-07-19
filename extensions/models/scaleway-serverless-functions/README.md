@@ -10,24 +10,24 @@ Authenticated with the `X-Auth-Token` header (secret key wired from a vault).
 
 | Method            | What it does                                                            |
 | ----------------- | ----------------------------------------------------------------------- |
-| `sync`            | Fetch the function's current state (`GetFunction`) and store a snapshot  |
-| `create`          | Provision a new function (`CreateFunction`) in a namespace and snapshot  |
-| `update`          | Mutate mutable fields — runtime, scaling, env, etc. (`UpdateFunction`)   |
-| `action`          | Deploy the function (`op=deploy`, `DeployFunction`) and re-snapshot      |
-| `delete`          | Deprovision the function (`DeleteFunction`); idempotent (404 → absent)   |
-| `list`            | Factory discovery — snapshot every function in the region (paginated)    |
-| `list-namespaces` | Factory discovery — snapshot every function namespace (paginated)        |
+| `sync`            | Fetch the function's current state (`GetFunction`) and store a snapshot |
+| `create`          | Provision a new function (`CreateFunction`) in a namespace and snapshot |
+| `update`          | Mutate mutable fields — runtime, scaling, env, etc. (`UpdateFunction`)  |
+| `action`          | Deploy the function (`op=deploy`, `DeployFunction`) and re-snapshot     |
+| `delete`          | Deprovision the function (`DeleteFunction`); idempotent (404 → absent)  |
+| `list`            | Factory discovery — snapshot every function in the region (paginated)   |
+| `list-namespaces` | Factory discovery — snapshot every function namespace (paginated)       |
 
-`sync`, `list`, and `list-namespaces` are read-only. Deployment is asynchronous —
-the function returns a transient status (`pending`, `deploying`); poll `sync` to
-observe the settled `ready` state.
+`sync`, `list`, and `list-namespaces` are read-only. Deployment is asynchronous
+— the function returns a transient status (`pending`, `deploying`); poll `sync`
+to observe the settled `ready` state.
 
 ## Secret handling
 
 `secretEnvironmentVariables` on `create`/`update` is a sensitive input: it is
-sent to the API only to provision the function and is **never** logged or written
-into a resource snapshot. Snapshots store non-secret fields only (status,
-runtime, scaling, domain name, etc.).
+sent to the API only to provision the function and is **never** logged or
+written into a resource snapshot. Snapshots store non-secret fields only
+(status, runtime, scaling, domain name, etc.).
 
 ## Setup
 
@@ -63,14 +63,14 @@ swamp model @sntxrr/scaleway-serverless-functions method run list-namespaces mai
 
 ## Global arguments
 
-| Arg           | Required | Default                    | Description                                             |
-| ------------- | -------- | -------------------------- | ------------------------------------------------------- |
-| `secretKey`   | yes      | —                          | Scaleway API secret key (sensitive; wire from a vault)  |
-| `projectId`   | yes      | —                          | Project ID that owns the function and namespace         |
-| `region`      | no       | `fr-par`                   | Region (`fr-par`, `nl-ams`, `pl-waw`)                   |
-| `functionId`  | yes      | —                          | ID of the function this model manages                   |
-| `namespaceId` | no\*     | —                          | Namespace ID (required for `create`; scopes `list`)     |
-| `endpoint`    | no       | `https://api.scaleway.com` | Override the API host                                   |
+| Arg           | Required    | Default                    | Description                                                                                          |
+| ------------- | ----------- | -------------------------- | ---------------------------------------------------------------------------------------------------- |
+| `secretKey`   | yes         | —                          | Scaleway API secret key (sensitive; wire from a vault)                                               |
+| `projectId`   | yes         | —                          | Project ID that owns the function and namespace                                                      |
+| `region`      | no          | `fr-par`                   | Region (`fr-par`, `nl-ams`, `pl-waw`)                                                                |
+| `functionId`  | conditional | —                          | ID of the function this model manages. Required by every method except `create`, which provisions it |
+| `namespaceId` | no\*        | —                          | Namespace ID (required for `create`; scopes `list`)                                                  |
+| `endpoint`    | no          | `https://api.scaleway.com` | Override the API host                                                                                |
 
 \* `namespaceId` is required for `create` and optionally scopes `list` to a
 single namespace.

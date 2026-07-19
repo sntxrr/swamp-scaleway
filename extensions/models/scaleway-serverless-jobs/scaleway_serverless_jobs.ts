@@ -27,8 +27,10 @@ const GlobalArgsSchema = z.object({
   region: z.string().default("fr-par").describe(
     "Region, e.g. fr-par, nl-ams, pl-waw.",
   ),
-  jobDefinitionId: z.string().describe(
-    "ID of the Serverless Jobs job definition this model manages.",
+  jobDefinitionId: z.string().optional().describe(
+    "ID of the Serverless Jobs job definition this model manages. Optional — " +
+      "`create` provisions a new job definition and returns its ID; every " +
+      "other method requires it.",
   ),
   endpoint: z.string().optional().describe(
     "Override the API host. Defaults to https://api.scaleway.com.",
@@ -303,7 +305,11 @@ function toJobDefinitionResource(
 ): Record<string, unknown> {
   const cron = j.cron_schedule as Record<string, unknown> | null | undefined;
   return {
-    id: (j.id as string) ?? g.jobDefinitionId,
+    // Callers always supply an id: API responses carry one, and the delete
+    // path passes the guarded jobDefinitionId. The final "" is unreachable
+    // defensive padding so the snapshot still satisfies the schema's required
+    // id.
+    id: (j.id as string) ?? g.jobDefinitionId ?? "",
     name: (j.name as string) ?? null,
     state,
     projectId: (j.project_id as string) ?? g.projectId,
@@ -333,7 +339,10 @@ function toJobRunResource(
 ): Record<string, unknown> {
   return {
     id: (r.id as string) ?? "",
-    jobDefinitionId: (r.job_definition_id as string) ?? g.jobDefinitionId,
+    // Run responses always carry job_definition_id; the guarded globalArg and
+    // the final null are unreachable defensive padding.
+    jobDefinitionId: (r.job_definition_id as string) ?? g.jobDefinitionId ??
+      null,
     state: (r.state as string) ?? "unknown",
     cpuLimit: (r.cpu_limit as number) ?? null,
     memoryLimit: (r.memory_limit as number) ?? null,
@@ -350,11 +359,32 @@ function toJobRunResource(
 const jobDefinitionsPath = (g: GlobalArgs): string =>
   `/serverless-jobs/v1alpha2/regions/${g.region}/job-definitions`;
 
+/**
+ * Resolve the managed job definition ID for methods that act on an *existing*
+ * job definition.
+ *
+ * `jobDefinitionId` is optional in the global schema because `create`
+ * provisions the job definition and learns its ID from the API — requiring it
+ * up front would force callers to pass a throwaway placeholder just to satisfy
+ * validation. Methods that read, run, or mutate an existing job definition call
+ * this to fail fast with an actionable message.
+ */
+function requireJobDefinitionId(g: GlobalArgs, method: string): string {
+  if (!g.jobDefinitionId) {
+    throw new Error(
+      `The "${method}" method requires globalArgs.jobDefinitionId — the ID of ` +
+        `an existing job definition. Set jobDefinitionId on the model, or run ` +
+        `"create" first to provision one.`,
+    );
+  }
+  return g.jobDefinitionId;
+}
+
 // --- Model -----------------------------------------------------------------
 /** Scaleway Serverless Jobs model — one instance per job definition, keyed by jobDefinitionId. */
 export const model = {
   type: "@sntxrr/scaleway-serverless-jobs",
-  version: "2026.07.18.1",
+  version: "2026.07.19.1",
   globalArguments: GlobalArgsSchema,
   resources: {
     "job-definition": {
@@ -404,21 +434,22 @@ export const model = {
         context: ExecuteContext,
       ): Promise<{ dataHandles: Array<{ name: string }> }> => {
         const { globalArgs: g, logger } = context;
+        const jobDefinitionId = requireJobDefinitionId(g, "sync");
         logger.info("Syncing Scaleway job definition {id}", {
-          id: g.jobDefinitionId,
+          id: jobDefinitionId,
         });
         const res = await scalewayFetch<Record<string, unknown>>(
           g,
           "GET",
-          `${jobDefinitionsPath(g)}/${encodeURIComponent(g.jobDefinitionId)}`,
+          `${jobDefinitionsPath(g)}/${encodeURIComponent(jobDefinitionId)}`,
         );
         const handle = await context.writeResource(
           "job-definition",
-          g.jobDefinitionId,
+          jobDefinitionId,
           toJobDefinitionResource(res, g, new Date().toISOString()),
         );
         logger.info("Synced Scaleway job definition {id}", {
-          id: g.jobDefinitionId,
+          id: jobDefinitionId,
         });
         return { dataHandles: [handle] };
       },
@@ -464,7 +495,10 @@ export const model = {
           jobDefinitionsPath(g),
           body,
         );
-        const newId = (res.id as string) ?? g.jobDefinitionId;
+        // CreateJobDefinition always returns the new ID; fall back to a preset
+        // jobDefinitionId only if the caller pinned one, so create never
+        // depends on it being set.
+        const newId = (res.id as string) ?? g.jobDefinitionId ?? "";
         const handle = await context.writeResource(
           "job-definition",
           newId,
@@ -486,8 +520,9 @@ export const model = {
         context: ExecuteContext,
       ): Promise<{ dataHandles: Array<{ name: string }> }> => {
         const { globalArgs: g, logger } = context;
+        const jobDefinitionId = requireJobDefinitionId(g, "update");
         logger.info("Updating Scaleway job definition {id}", {
-          id: g.jobDefinitionId,
+          id: jobDefinitionId,
         });
         const body: Record<string, unknown> = {};
         if (args.name !== undefined) body.name = args.name;
@@ -514,16 +549,16 @@ export const model = {
         const res = await scalewayFetch<Record<string, unknown>>(
           g,
           "PATCH",
-          `${jobDefinitionsPath(g)}/${encodeURIComponent(g.jobDefinitionId)}`,
+          `${jobDefinitionsPath(g)}/${encodeURIComponent(jobDefinitionId)}`,
           body,
         );
         const handle = await context.writeResource(
           "job-definition",
-          g.jobDefinitionId,
+          jobDefinitionId,
           toJobDefinitionResource(res, g, new Date().toISOString()),
         );
         logger.info("Updated Scaleway job definition {id}", {
-          id: g.jobDefinitionId,
+          id: jobDefinitionId,
         });
         return { dataHandles: [handle] };
       },
@@ -536,8 +571,9 @@ export const model = {
         context: ExecuteContext,
       ): Promise<{ dataHandles: Array<{ name: string }> }> => {
         const { globalArgs: g, logger } = context;
+        const jobDefinitionId = requireJobDefinitionId(g, "delete");
         logger.info("Deleting Scaleway job definition {id}", {
-          id: g.jobDefinitionId,
+          id: jobDefinitionId,
         });
         // Idempotent delete: a 404 means the job definition is already gone —
         // treat it as success and record an absent snapshot (CONVENTIONS.md §3.2).
@@ -547,7 +583,7 @@ export const model = {
           res = await scalewayFetch<Record<string, unknown>>(
             g,
             "DELETE",
-            `${jobDefinitionsPath(g)}/${encodeURIComponent(g.jobDefinitionId)}`,
+            `${jobDefinitionsPath(g)}/${encodeURIComponent(jobDefinitionId)}`,
           );
         } catch (e) {
           if ((e as { status?: number }).status !== 404) throw e;
@@ -556,23 +592,23 @@ export const model = {
         const observedAt = new Date().toISOString();
         const snapshot = absent
           ? toJobDefinitionResource(
-            { id: g.jobDefinitionId },
+            { id: jobDefinitionId },
             g,
             observedAt,
             "absent",
           )
           : toJobDefinitionResource(
-            res ?? { id: g.jobDefinitionId },
+            res ?? { id: jobDefinitionId },
             g,
             observedAt,
           );
         const handle = await context.writeResource(
           "job-definition",
-          g.jobDefinitionId,
+          jobDefinitionId,
           snapshot,
         );
         logger.info("Deleted Scaleway job definition {id} (absent={absent})", {
-          id: g.jobDefinitionId,
+          id: jobDefinitionId,
           absent,
         });
         return { dataHandles: [handle] };
@@ -587,8 +623,9 @@ export const model = {
         context: ExecuteContext,
       ): Promise<{ dataHandles: Array<{ name: string }> }> => {
         const { globalArgs: g, logger } = context;
+        const jobDefinitionId = requireJobDefinitionId(g, "action");
         logger.info("Running Scaleway job definition {id}", {
-          id: g.jobDefinitionId,
+          id: jobDefinitionId,
         });
         // Contextual environment variables are sent to run but never stored.
         const body: Record<string, unknown> = {};
@@ -604,7 +641,7 @@ export const model = {
           g,
           "POST",
           `${jobDefinitionsPath(g)}/${
-            encodeURIComponent(g.jobDefinitionId)
+            encodeURIComponent(jobDefinitionId)
           }/start`,
           body,
         );
@@ -623,7 +660,7 @@ export const model = {
         }
         logger.info("Started {n} job run(s) for job definition {id}", {
           n: runs.length,
-          id: g.jobDefinitionId,
+          id: jobDefinitionId,
         });
         return { dataHandles: handles };
       },
