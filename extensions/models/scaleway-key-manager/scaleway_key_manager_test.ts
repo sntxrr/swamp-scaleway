@@ -413,3 +413,41 @@ Deno.test("keysPath is regional and versioned v1alpha1", () => {
     "/key-manager/v1alpha1/regions/fr-par/keys",
   );
 });
+
+Deno.test("protect POSTs to the protect path and re-snapshots the key", async () => {
+  const { ctx, writes } = makeContext();
+  let captured: { url: string; init: RequestInit } | null = null;
+  await withMockedFetch(
+    (url, init) => {
+      captured = { url, init };
+      return new Response(
+        JSON.stringify({ id: G.keyId, state: "enabled", protected: true }),
+        { status: 200 },
+      );
+    },
+    () => model.methods.protect.execute({}, ctx),
+  );
+  const call = captured as unknown as { url: string; init: RequestInit };
+  assertEquals(call.init.method, "POST");
+  assertStringIncludes(call.url, `/keys/${G.keyId}/protect`);
+  assertEquals(writes[0].spec, "key");
+});
+
+Deno.test("unprotect POSTs to the unprotect path and re-snapshots the key", async () => {
+  const { ctx, writes } = makeContext();
+  let captured: { url: string; init: RequestInit } | null = null;
+  await withMockedFetch(
+    (url, init) => {
+      captured = { url, init };
+      return new Response(
+        JSON.stringify({ id: G.keyId, state: "enabled", protected: false }),
+        { status: 200 },
+      );
+    },
+    () => model.methods.unprotect.execute({}, ctx),
+  );
+  const call = captured as unknown as { url: string; init: RequestInit };
+  assertEquals(call.init.method, "POST");
+  assertStringIncludes(call.url, `/keys/${G.keyId}/unprotect`);
+  assertEquals(writes[0].spec, "key");
+});

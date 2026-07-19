@@ -1,22 +1,24 @@
 # @sntxrr/scaleway-key-manager
 
-A [swamp](https://swamp-club.com) model for a **Scaleway Key Manager (KMS)
-key** — one model instance per key, keyed by its key ID. Wraps the
+A [swamp](https://swamp-club.com) model for a **Scaleway Key Manager (KMS) key**
+— one model instance per key, keyed by its key ID. Wraps the
 [Scaleway Key Manager API](https://www.scaleway.com/en/developers/api/key-manager/)
 (`/key-manager/v1alpha1`, regional) using only Deno's built-in `fetch` — no SDK.
 Authenticated with the `X-Auth-Token` header (secret key wired from a vault).
 
 ## Methods
 
-| Method    | What it does                                                              |
-| --------- | ------------------------------------------------------------------------ |
-| `sync`    | Fetch the key's current metadata (`GetKey`) and store a snapshot          |
-| `create`  | Provision a new key (`CreateKey`) and snapshot its metadata               |
-| `delete`  | Deprovision the key (`DeleteKey`) — idempotent (a 404 is treated as gone) |
-| `list`    | Factory discovery — snapshot every key in the region (paginated)          |
-| `encrypt` | Encrypt base64 plaintext (`Encrypt`); snapshots only the ciphertext       |
-| `decrypt` | Decrypt ciphertext (`Decrypt`); returns plaintext in a sensitive field    |
-| `rotate`  | Rotate the key's material (`RotateKey`) and re-snapshot it                |
+| Method      | What it does                                                                             |
+| ----------- | ---------------------------------------------------------------------------------------- |
+| `sync`      | Fetch the key's current metadata (`GetKey`) and store a snapshot                         |
+| `create`    | Provision a new key (`CreateKey`) and snapshot its metadata                              |
+| `delete`    | Deprovision the key (`DeleteKey`) — idempotent (404/412-already-deleted treated as gone) |
+| `list`      | Factory discovery — snapshot every key in the region (paginated)                         |
+| `encrypt`   | Encrypt base64 plaintext (`Encrypt`); snapshots only the ciphertext                      |
+| `decrypt`   | Decrypt ciphertext (`Decrypt`); returns plaintext in a sensitive field                   |
+| `rotate`    | Rotate the key's material (`RotateKey`) and re-snapshot it                               |
+| `protect`   | Enable deletion protection (`ProtectKey`)                                                |
+| `unprotect` | Disable deletion protection (`UnprotectKey`) so the key can be deleted                   |
 
 ## Secret handling
 

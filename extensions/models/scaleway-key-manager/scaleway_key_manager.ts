@@ -269,7 +269,7 @@ const keysPath = (g: GlobalArgs): string =>
 /** Scaleway Key Manager model — one instance per key, keyed by keyId. */
 export const model = {
   type: "@sntxrr/scaleway-key-manager",
-  version: "2026.07.18.1",
+  version: "2026.07.19.1",
   globalArguments: GlobalArgsSchema,
   resources: {
     "key": {
@@ -505,6 +505,56 @@ export const model = {
           toKeyResource(res, g, new Date().toISOString()),
         );
         logger.info("Rotated Scaleway KMS key {id}", { id: g.keyId });
+        return { dataHandles: [handle] };
+      },
+    },
+    protect: {
+      description:
+        "Enable deletion protection on the key (ProtectKey). A protected key " +
+        "cannot be deleted until it is unprotected.",
+      arguments: z.object({}),
+      execute: async (
+        _args: Record<string, never>,
+        context: ExecuteContext,
+      ): Promise<{ dataHandles: Array<{ name: string }> }> => {
+        const { globalArgs: g, logger } = context;
+        logger.info("Protecting Scaleway KMS key {id}", { id: g.keyId });
+        const res = await scalewayFetch<Record<string, unknown>>(
+          g,
+          "POST",
+          `${keysPath(g)}/${encodeURIComponent(g.keyId)}/protect`,
+        );
+        const handle = await context.writeResource(
+          "key",
+          g.keyId,
+          toKeyResource(res, g, new Date().toISOString()),
+        );
+        logger.info("Protected Scaleway KMS key {id}", { id: g.keyId });
+        return { dataHandles: [handle] };
+      },
+    },
+    unprotect: {
+      description:
+        "Disable deletion protection on the key (UnprotectKey), allowing it to " +
+        "be deleted.",
+      arguments: z.object({}),
+      execute: async (
+        _args: Record<string, never>,
+        context: ExecuteContext,
+      ): Promise<{ dataHandles: Array<{ name: string }> }> => {
+        const { globalArgs: g, logger } = context;
+        logger.info("Unprotecting Scaleway KMS key {id}", { id: g.keyId });
+        const res = await scalewayFetch<Record<string, unknown>>(
+          g,
+          "POST",
+          `${keysPath(g)}/${encodeURIComponent(g.keyId)}/unprotect`,
+        );
+        const handle = await context.writeResource(
+          "key",
+          g.keyId,
+          toKeyResource(res, g, new Date().toISOString()),
+        );
+        logger.info("Unprotected Scaleway KMS key {id}", { id: g.keyId });
         return { dataHandles: [handle] };
       },
     },
