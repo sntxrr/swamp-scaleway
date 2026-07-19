@@ -144,6 +144,8 @@ Deno.test("delete DELETEs the data source", async () => {
   );
   assertEquals(methods[0], "DELETE");
   assertEquals(writes[0].name, G.dataSourceId);
+  // A successful delete marks the snapshot absent (symmetric with the 404 path).
+  assertEquals(writes[0].data.absent, true);
 });
 
 Deno.test("delete treats a 404 as success and writes an absent snapshot", async () => {
@@ -157,7 +159,7 @@ Deno.test("delete treats a 404 as success and writes an absent snapshot", async 
   assertEquals(writes.length, 1);
   assertEquals(writes[0].name, G.dataSourceId);
   assertEquals(writes[0].data.id, G.dataSourceId);
-  assertEquals(writes[0].data.type, "absent");
+  assertEquals(writes[0].data.absent, true);
 });
 
 Deno.test("list aggregates pages until total_count is reached", async () => {

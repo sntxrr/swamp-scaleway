@@ -10,7 +10,7 @@
  * API reference: https://www.scaleway.com/en/developers/api/instance/
  * @module
  */
-// extensions/models/scaleway_instance.ts
+// extensions/models/scaleway-instance/scaleway_instance.ts
 import { z } from "npm:zod@4";
 
 // --- Schemas ---------------------------------------------------------------
@@ -179,7 +179,7 @@ const SCALEWAY_ZONES: readonly string[] = [
 /** Scaleway Instance server model — one instance per server, keyed by serverId. */
 export const model = {
   type: "@sntxrr/scaleway-instance",
-  version: "2026.07.18.1",
+  version: "2026.07.18.2",
   globalArguments: GlobalArgsSchema,
   resources: {
     "server": {

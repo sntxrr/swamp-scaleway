@@ -57,6 +57,9 @@ const DataSourceSchema = z.object({
   type: z.string().nullable().optional().describe(
     "Data source type: metrics, logs, or traces.",
   ),
+  absent: z.boolean().optional().describe(
+    "True once the data source has been deleted (recorded by delete).",
+  ),
   url: z.string().nullable().optional().describe(
     "Ingestion/query URL of the data source. Non-secret.",
   ),
@@ -254,7 +257,7 @@ const tokensPath = (g: GlobalArgs): string =>
 /** Scaleway Cockpit model — one instance per data source, keyed by dataSourceId. */
 export const model = {
   type: "@sntxrr/scaleway-cockpit",
-  version: "2026.07.18.1",
+  version: "2026.07.18.2",
   globalArguments: GlobalArgsSchema,
   resources: {
     "data-source": {
@@ -392,13 +395,13 @@ export const model = {
           absent = true;
         }
         const observedAt = new Date().toISOString();
-        const snapshot = absent
-          ? toDataSourceResource(
-            { id: g.dataSourceId, type: "absent" },
-            g,
-            observedAt,
-          )
-          : toDataSourceResource(res ?? { id: g.dataSourceId }, g, observedAt);
+        // The data source is gone whether the delete succeeded (204) or the
+        // resource was already absent (404) — mark the snapshot absent in both
+        // cases so the two paths are symmetric.
+        const snapshot = {
+          ...toDataSourceResource(res ?? { id: g.dataSourceId }, g, observedAt),
+          absent: true,
+        };
         const handle = await context.writeResource(
           "data-source",
           g.dataSourceId,

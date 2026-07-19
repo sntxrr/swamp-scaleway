@@ -344,3 +344,34 @@ Deno.test("functionsPath and namespacesPath are regional", () => {
     "/functions/v1beta1/regions/fr-par/namespaces",
   );
 });
+
+Deno.test("create without a namespaceId throws and writes nothing", async () => {
+  const writes: Array<{ spec: string; name: string; data: unknown }> = [];
+  // deno-lint-ignore no-explicit-any
+  const ctx = {
+    globalArgs: { ...G, namespaceId: undefined },
+    logger: { info: () => {}, warn: () => {} },
+    writeResource: (spec: string, name: string, data: unknown) => {
+      writes.push({ spec, name, data });
+      return Promise.resolve({ name });
+    },
+    // deno-lint-ignore no-explicit-any
+  } as any;
+  let threw = false;
+  await withMockedFetch(
+    () => new Response(JSON.stringify({}), { status: 200 }),
+    async () => {
+      try {
+        await model.methods.create.execute(
+          { name: "x", runtime: "node22", privacy: "public" },
+          ctx,
+        );
+      } catch (e) {
+        threw = true;
+        assertStringIncludes((e as Error).message, "namespaceId");
+      }
+    },
+  );
+  assert(threw, "expected create without namespaceId to throw");
+  assertEquals(writes.length, 0);
+});

@@ -259,7 +259,7 @@ const emailsPath = (g: GlobalArgs): string =>
 /** Scaleway Transactional Email model — one instance per sending domain, keyed by domainId. */
 export const model = {
   type: "@sntxrr/scaleway-tem",
-  version: "2026.07.18.1",
+  version: "2026.07.18.2",
   globalArguments: GlobalArgsSchema,
   resources: {
     "domain": {
@@ -363,7 +363,7 @@ export const model = {
     },
     delete: {
       description:
-        "Revoke the sending domain (DeleteDomain — POST .../{id}/delete).",
+        "Delete the sending domain (DeleteDomain — POST .../{id}/delete).",
       arguments: z.object({}),
       execute: async (
         _args: Record<string, never>,

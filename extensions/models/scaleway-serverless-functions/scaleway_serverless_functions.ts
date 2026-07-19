@@ -326,7 +326,7 @@ const namespacesPath = (g: GlobalArgs): string =>
 /** Scaleway Serverless Functions model — one instance per function, keyed by functionId. */
 export const model = {
   type: "@sntxrr/scaleway-serverless-functions",
-  version: "2026.07.18.1",
+  version: "2026.07.18.2",
   globalArguments: GlobalArgsSchema,
   resources: {
     "function": {
@@ -398,6 +398,11 @@ export const model = {
         context: ExecuteContext,
       ): Promise<{ dataHandles: Array<{ name: string }> }> => {
         const { globalArgs: g, logger } = context;
+        if (g.namespaceId === undefined) {
+          throw new Error(
+            "namespaceId global arg is required to create a function.",
+          );
+        }
         logger.info("Creating Scaleway function {name} in {region}", {
           name: args.name,
           region: g.region,
