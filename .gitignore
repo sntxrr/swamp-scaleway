@@ -16,5 +16,7 @@
 # Local model and vault instances (developer-specific: bound to one operator's
 # org/project IDs and 1Password vault). This repo tracks extension *sources*;
 # instances are local state. workflows/ IS tracked — those are shareable.
-models/
-vaults/
+# Leading slash anchors these to the repo root so they do NOT also match
+# extensions/models/ (the tracked extension sources).
+/models/
+/vaults/
