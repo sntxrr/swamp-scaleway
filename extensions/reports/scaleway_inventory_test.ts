@@ -6,7 +6,7 @@
  * @module
  */
 import { assertEquals, assertStringIncludes } from "jsr:@std/assert@1";
-import { createReportTestContext } from "jsr:@swamp-club/swamp-testing";
+import { createReportTestContext } from "jsr:@swamp-club/swamp-testing@0.20260928.39";
 import { report } from "./scaleway_inventory.ts";
 
 type InventoryReportContext = Parameters<typeof report.execute>[0];
