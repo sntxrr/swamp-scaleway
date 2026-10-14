@@ -1,8 +1,9 @@
 manifestVersion: 1
 
 name: "@sntxrr/scaleway-messaging"
-version: "2026.07.19.1"
+version: "2026.10.14.1"
 description: "Manage a Scaleway Messaging & Queuing (MNQ) NATS account — sync state, create, update, and delete NATS accounts, and discover accounts in a region, via the MNQ API with X-Auth-Token auth."
+license: MIT
 repository: "https://github.com/sntxrr/swamp-scaleway"
 
 paths:

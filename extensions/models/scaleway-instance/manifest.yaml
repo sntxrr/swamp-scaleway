@@ -1,8 +1,9 @@
 manifestVersion: 1
 
 name: "@sntxrr/scaleway-instance"
-version: "2026.07.19.1"
+version: "2026.10.14.1"
 description: "Manage a Scaleway Instance compute server — sync current state, issue power actions (poweron/poweroff/reboot/stop_in_place/terminate), and discover servers in a zone, via the Instance API with X-Auth-Token auth."
+license: MIT
 repository: "https://github.com/sntxrr/swamp-scaleway"
 
 paths:

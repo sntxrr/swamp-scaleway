@@ -1,8 +1,9 @@
 manifestVersion: 1
 
 name: "@sntxrr/scaleway-vpc"
-version: "2026.07.19.1"
+version: "2026.10.14.1"
 description: "Manage a Scaleway VPC — sync current state, create, update and delete VPCs, and discover VPCs and Private Networks in a region, via the VPC API with X-Auth-Token auth."
+license: MIT
 repository: "https://github.com/sntxrr/swamp-scaleway"
 
 paths:

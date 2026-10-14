@@ -1,8 +1,9 @@
 manifestVersion: 1
 
 name: "@sntxrr/scaleway-serverless-functions"
-version: "2026.07.19.1"
+version: "2026.10.14.1"
 description: "Manage a Scaleway Serverless Function — sync state, create, update, deploy, and delete functions, and discover functions and namespaces in a region, via the Serverless Functions API with X-Auth-Token auth."
+license: MIT
 repository: "https://github.com/sntxrr/swamp-scaleway"
 
 paths:
