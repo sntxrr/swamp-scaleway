@@ -1,8 +1,9 @@
 manifestVersion: 1
 
 name: "@sntxrr/scaleway-file-storage"
-version: "2026.07.19.1"
+version: "2026.10.14.1"
 description: "Manage a Scaleway File Storage (managed NFS) filesystem — sync state, create, update, and delete network-attached filesystems, and discover filesystems in a region, via the File Storage API with X-Auth-Token auth."
+license: MIT
 repository: "https://github.com/sntxrr/swamp-scaleway"
 
 paths:

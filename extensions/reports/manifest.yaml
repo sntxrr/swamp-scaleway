@@ -1,8 +1,9 @@
 manifestVersion: 1
 
 name: "@sntxrr/scaleway-inventory"
-version: "2026.07.18.1"
+version: "2026.10.14.1"
 description: "Consolidated inventory report across all @sntxrr/scaleway-* models — counts per service, per region/zone, per status, plus resource ids, names, and statuses, discovered from stored sync/list snapshots."
+license: MIT
 repository: "https://github.com/sntxrr/swamp-scaleway"
 
 paths:

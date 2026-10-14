@@ -1,8 +1,9 @@
 manifestVersion: 1
 
 name: "@sntxrr/scaleway-cockpit"
-version: "2026.07.19.2"
+version: "2026.10.14.1"
 description: "Manage a Scaleway Cockpit (Observability) data source — sync state, create metrics/logs/traces data sources, delete, and discover data sources and tokens in a region, via the Cockpit API with X-Auth-Token auth."
+license: MIT
 repository: "https://github.com/sntxrr/swamp-scaleway"
 
 paths:
