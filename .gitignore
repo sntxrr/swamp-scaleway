@@ -20,3 +20,6 @@
 # extensions/models/ (the tracked extension sources).
 /models/
 /vaults/
+
+# Operator-specific live-test overrides (vault/item names); see tests/live/config.sh.
+/tests/live/config.local.sh
